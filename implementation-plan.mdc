@@ -37,3 +37,8 @@ Updated runtime `cameraPanelJs` script in `flow.json` so `/api/camera-panel.js` 
 Done
 Verified no remaining fixed-IP camera references and no `cameraHost` fallback dependencies tied to the old single-camera model.
 Prepared flow and client logic for restart-safe behavior by persisting camera registry in file-backed context when available.
+
+## Step 9 - proxy-first-stream-strategy
+Done
+Refactored stream connection logic to prioritize proxy URLs over direct camera access for universal Tailscale compatibility.
+Reduced timeout from 9s to 3s, adjusted reconnect attempts (proxy: 3, direct: 2), and updated both single-view and tile-view to use proxy-first approach.

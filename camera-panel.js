@@ -4,12 +4,12 @@ msg.payload = `(function(){
   const styleId='cameraFloatingPanelStyle';
   const modeSingle='single';
   const modeTile='tile';
-  const streamConnectTimeoutMs=9000;
+  const streamConnectTimeoutMs=3000;
   const directReconnectDelayMs=1200;
   const proxyReconnectDelayMs=1500;
-  const maxDirectReconnectAttempts=3;
-  const maxProxyReconnectAttempts=2;
-  const maxInitialDirectErrorsBeforeCapture=2;
+  const maxDirectReconnectAttempts=2;
+  const maxProxyReconnectAttempts=3;
+  const maxInitialProxyErrorsBeforeDirect=2;
   let panelOpen=false;
   let mode=modeSingle;
   let cameras=[];
@@ -369,9 +369,55 @@ msg.payload = `(function(){
       startCaptureLoop(proxyCaptureUrl, 'Fallback: Proxy-Capture', 'proxy-capture', requestId);
     }
 
+    function startProxyStream(cfg, requestId){
+      if(!cfg||!cfg.proxyStreamUrl) {
+        startDirectStreamIfAvailable(cfg, requestId);
+        return;
+      }
+      if(typeof requestId==='number' && requestId!==streamState.requestId) return;
+      stopFallback();
+      stopStreamStageTimer();
+      streamState.currentTransport='proxy';
+      setBadge(streamState.hasEverLoadedStream ? 'Proxy-Stream reconnect...' : 'Verbinde über Proxy...');
+      singleImg.src=cfg.proxyStreamUrl+(cfg.proxyStreamUrl.indexOf('?')>=0?'&':'?')+'t='+Date.now();
+      streamStageTimer=setTimeout(function(){
+        if(!panelOpen||singleConfig!==cfg||streamState.currentTransport!=='proxy') return;
+        if(typeof requestId==='number' && requestId!==streamState.requestId) return;
+        if(streamState.hasEverLoadedStream){
+          streamState.consecutiveProxyErrors+=1;
+          scheduleProxyReconnect(cfg, requestId);
+          return;
+        }
+        streamState.consecutiveProxyErrors+=1;
+        if(streamState.consecutiveProxyErrors<maxInitialProxyErrorsBeforeDirect){
+          scheduleProxyReconnect(cfg, requestId);
+          return;
+        }
+        startDirectStreamIfAvailable(cfg, requestId);
+      },streamConnectTimeoutMs);
+    }
+
+    function startDirectStreamIfAvailable(cfg, requestId){
+      if(!cfg||!cfg.streamUrl){
+        startProxyCaptureFallback(cfg, requestId);
+        return;
+      }
+      if(typeof requestId==='number' && requestId!==streamState.requestId) return;
+      stopFallback();
+      stopStreamStageTimer();
+      streamState.currentTransport='direct';
+      setBadge('Proxy fehlgeschlagen, versuche direkt...');
+      singleImg.src=cfg.streamUrl+(cfg.streamUrl.indexOf('?')>=0?'&':'?')+'t='+Date.now();
+      streamStageTimer=setTimeout(function(){
+        if(!panelOpen||singleConfig!==cfg||streamState.currentTransport!=='direct') return;
+        if(typeof requestId==='number' && requestId!==streamState.requestId) return;
+        startDirectCaptureCheck(cfg, requestId);
+      },streamConnectTimeoutMs);
+    }
+
     function startDirectCaptureCheck(cfg, requestId){
       if(!cfg||!cfg.directCaptureUrl){
-        startProxyStreamIfAvailable(cfg, requestId);
+        startProxyCaptureFallback(cfg, requestId);
         return;
       }
       if(typeof requestId==='number' && requestId!==streamState.requestId) return;
@@ -379,86 +425,22 @@ msg.payload = `(function(){
       stopStreamStageTimer();
       streamState.currentTransport='direct-capture-check';
       streamState.currentCaptureUrl=cfg.directCaptureUrl;
-      setBadge('Direktstream fehlgeschlagen, teste Direkt-Capture...');
+      setBadge('Teste Direkt-Capture...');
       singleImg.src=cfg.directCaptureUrl+(cfg.directCaptureUrl.indexOf('?')>=0?'&':'?')+'t='+Date.now();
       streamStageTimer=setTimeout(function(){
         if(!panelOpen||singleConfig!==cfg||streamState.currentTransport!=='direct-capture-check') return;
         if(typeof requestId==='number' && requestId!==streamState.requestId) return;
-        startProxyStreamIfAvailable(cfg, requestId);
-      },streamConnectTimeoutMs);
-    }
-
-    function startDirectStream(cfg, requestId){
-      if(!cfg||!cfg.streamUrl){
-        startProxyStreamIfAvailable(cfg, requestId);
-        return;
-      }
-      if(typeof requestId==='number' && requestId!==streamState.requestId) return;
-      stopFallback();
-      stopStreamStageTimer();
-      streamState.currentTransport='direct';
-      setBadge(streamState.hasEverLoadedStream ? 'Direktstream reconnect...' : 'Verbinde direkt...');
-      singleImg.src=cfg.streamUrl+(cfg.streamUrl.indexOf('?')>=0?'&':'?')+'t='+Date.now();
-      streamStageTimer=setTimeout(function(){
-        if(!panelOpen||singleConfig!==cfg||streamState.currentTransport!=='direct') return;
-        if(typeof requestId==='number' && requestId!==streamState.requestId) return;
-        if(streamState.hasEverLoadedStream){
-          streamState.consecutiveDirectErrors+=1;
-          scheduleDirectReconnect(cfg, requestId);
-          return;
-        }
-        streamState.consecutiveDirectErrors+=1;
-        if(streamState.consecutiveDirectErrors<maxInitialDirectErrorsBeforeCapture){
-          scheduleDirectReconnect(cfg, requestId);
-          return;
-        }
-        startDirectCaptureCheck(cfg, requestId);
-      },streamConnectTimeoutMs);
-    }
-
-    function startProxyStreamIfAvailable(cfg, requestId){
-      if(!cfg||!cfg.proxyStreamUrl) {
-        startProxyCaptureFallback(cfg, requestId);
-        return;
-      }
-      if(typeof requestId==='number' && requestId!==streamState.requestId) return;
-      stopFallback();
-      stopStreamStageTimer();
-      streamState.currentTransport='proxy';
-      setBadge('Direkt fehlgeschlagen, versuche Proxy...');
-      singleImg.src=cfg.proxyStreamUrl+(cfg.proxyStreamUrl.indexOf('?')>=0?'&':'?')+'t='+Date.now();
-      streamStageTimer=setTimeout(function(){
-        if(!panelOpen||singleConfig!==cfg||streamState.currentTransport!=='proxy') return;
-        if(typeof requestId==='number' && requestId!==streamState.requestId) return;
         startProxyCaptureFallback(cfg, requestId);
       },streamConnectTimeoutMs);
-    }
-
-    function scheduleDirectReconnect(cfg, requestId){
-      if(!panelOpen||!cfg||!cfg.streamUrl) {
-        startDirectCaptureCheck(cfg, requestId);
-        return;
-      }
-      if(streamState.consecutiveDirectErrors>=maxDirectReconnectAttempts){
-        startDirectCaptureCheck(cfg, requestId);
-        return;
-      }
-      stopDirectReconnectTimer();
-      setBadge('Direktstream unterbrochen, reconnect...');
-      directReconnectTimer=setTimeout(function(){
-        if(!panelOpen||singleConfig!==cfg) return;
-        if(typeof requestId==='number' && requestId!==streamState.requestId) return;
-        startDirectStream(cfg, requestId);
-      },directReconnectDelayMs);
     }
 
     function scheduleProxyReconnect(cfg, requestId){
       if(!panelOpen||!cfg||!cfg.proxyStreamUrl){
-        startProxyCaptureFallback(cfg, requestId);
+        startDirectStreamIfAvailable(cfg, requestId);
         return;
       }
       if(streamState.consecutiveProxyErrors>=maxProxyReconnectAttempts){
-        startProxyCaptureFallback(cfg, requestId);
+        startDirectStreamIfAvailable(cfg, requestId);
         return;
       }
       stopProxyReconnectTimer();
@@ -466,8 +448,26 @@ msg.payload = `(function(){
       proxyReconnectTimer=setTimeout(function(){
         if(!panelOpen||singleConfig!==cfg) return;
         if(typeof requestId==='number' && requestId!==streamState.requestId) return;
-        startProxyStreamIfAvailable(cfg, requestId);
+        startProxyStream(cfg, requestId);
       },proxyReconnectDelayMs);
+    }
+
+    function scheduleDirectReconnect(cfg, requestId){
+      if(!panelOpen||!cfg||!cfg.streamUrl) {
+        startProxyCaptureFallback(cfg, requestId);
+        return;
+      }
+      if(streamState.consecutiveDirectErrors>=maxDirectReconnectAttempts){
+        startProxyCaptureFallback(cfg, requestId);
+        return;
+      }
+      stopDirectReconnectTimer();
+      setBadge('Direktstream unterbrochen, reconnect...');
+      directReconnectTimer=setTimeout(function(){
+        if(!panelOpen||singleConfig!==cfg) return;
+        if(typeof requestId==='number' && requestId!==streamState.requestId) return;
+        startDirectStreamIfAvailable(cfg, requestId);
+      },directReconnectDelayMs);
     }
 
     function resetStreamState(preserveLoadedFlag){
@@ -492,7 +492,7 @@ msg.payload = `(function(){
         streamState.requestId += 1;
         resetStreamState(shouldPreserveLoadedFlag);
         resetImageTransform();
-        startDirectStream(cfg, streamState.requestId);
+        startProxyStream(cfg, streamState.requestId);
       }).catch(function(e){setBadge(e&&e.message?e.message:'Kamera offline.');});
     }
 
@@ -533,7 +533,7 @@ msg.payload = `(function(){
         return;
       }
       if(streamState.currentTransport==='direct-capture' || streamState.currentTransport==='direct-capture-check'){
-        startProxyStreamIfAvailable(singleConfig, streamState.requestId);
+        startProxyCaptureFallback(singleConfig, streamState.requestId);
         return;
       }
       if(streamState.currentTransport==='proxy'){
@@ -546,20 +546,16 @@ msg.payload = `(function(){
         scheduleDirectReconnect(singleConfig, streamState.requestId);
         return;
       }
-      if(streamState.consecutiveDirectErrors<maxInitialDirectErrorsBeforeCapture){
-        scheduleDirectReconnect(singleConfig, streamState.requestId);
-        return;
-      }
-      startDirectCaptureCheck(singleConfig, streamState.requestId);
+      scheduleDirectReconnect(singleConfig, streamState.requestId);
     });
 
     function loadTileCamera(tileImg,cfg,cameraId){
       if(!panelOpen||mode!==modeTile) return;
-      if(cfg.streamUrl){
-        tileImg.src=cfg.streamUrl+(cfg.streamUrl.indexOf('?')>=0?'&':'?')+'t='+Date.now();
-        setTimeout(function(){if(panelOpen&&mode===modeTile){tileImg.src=(cfg.captureUrl||'')+((cfg.captureUrl||'').indexOf('?')>=0?'&':'?')+'t='+Date.now();tileTimers[cameraId]=setTimeout(function(){loadTileCamera(tileImg,cfg,cameraId);},Number(cfg.fallbackIntervalMs)>0?Number(cfg.fallbackIntervalMs):1200);}},9000);
-      }else if(cfg.captureUrl){
-        tileImg.src=cfg.captureUrl+(cfg.captureUrl.indexOf('?')>=0?'&':'?')+'t='+Date.now();
+      if(cfg.proxyStreamUrl){
+        tileImg.src=cfg.proxyStreamUrl+(cfg.proxyStreamUrl.indexOf('?')>=0?'&':'?')+'t='+Date.now();
+        setTimeout(function(){if(panelOpen&&mode===modeTile){tileImg.src=(cfg.proxyCaptureUrl||cfg.captureUrl||'')+((cfg.proxyCaptureUrl||cfg.captureUrl||'').indexOf('?')>=0?'&':'?')+'t='+Date.now();tileTimers[cameraId]=setTimeout(function(){loadTileCamera(tileImg,cfg,cameraId);},Number(cfg.fallbackIntervalMs)>0?Number(cfg.fallbackIntervalMs):1200);}},3000);
+      }else if(cfg.proxyCaptureUrl||cfg.captureUrl){
+        tileImg.src=(cfg.proxyCaptureUrl||cfg.captureUrl)+(((cfg.proxyCaptureUrl||cfg.captureUrl)||'').indexOf('?')>=0?'&':'?')+'t='+Date.now();
         tileTimers[cameraId]=setTimeout(function(){loadTileCamera(tileImg,cfg,cameraId);},Number(cfg.fallbackIntervalMs)>0?Number(cfg.fallbackIntervalMs):1200);
       }
     }
