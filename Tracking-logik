@@ -1,0 +1,331 @@
+const MAX_HISTORY = 2000;
+const MIN_POINT_DISTANCE_M = 8;
+const MAX_ACCURACY_M = 15;
+const SIMPLIFY_TOLERANCE_M = 5;
+const SIMPLIFY_EVERY_N_POINTS = 25;
+const RECENT_POINT_WINDOW_MS = 5 * 60 * 1000;
+const MIN_TIME_BETWEEN_POINTS_MS = 1000;
+const MIN_MOVEMENT_SPEED_MPS = 0.3;
+const ACCURACY_DISTANCE_MULTIPLIER = 1.2;
+const MAX_REASONABLE_SPEED_MPS = 18;
+const STATIONARY_SPEED_THRESHOLD_MPS = 0.5;
+const STATIONARY_DRIFT_RADIUS_M = 12;
+const STATIONARY_MAX_ACCURACY_M = 20;
+
+function asNumber(value) {
+    if (value === undefined || value === null || value === "") {
+        return NaN;
+    }
+    return Number(value);
+}
+
+function distanceMeters(pointA, pointB) {
+    if (!pointA || !pointB) return Number.POSITIVE_INFINITY;
+    const earthRadiusMeters = 6371000;
+    const toRadians = function (degreeValue) { return degreeValue * Math.PI / 180; };
+    const latDelta = toRadians(pointB.lat - pointA.lat);
+    const lonDelta = toRadians(pointB.lon - pointA.lon);
+    const haversine = Math.sin(latDelta / 2) * Math.sin(latDelta / 2) +
+        Math.cos(toRadians(pointA.lat)) * Math.cos(toRadians(pointB.lat)) *
+        Math.sin(lonDelta / 2) * Math.sin(lonDelta / 2);
+    return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function isValidCandidate(newPoint, previousPoint) {
+    if (!newPoint || typeof newPoint.lat !== "number" || typeof newPoint.lon !== "number") {
+        return false;
+    }
+    if (typeof newPoint.accuracy === "number" && newPoint.accuracy > MAX_ACCURACY_M) {
+        return false;
+    }
+    if (!previousPoint) return true;
+
+    const previousTimestamp = Number(previousPoint.timestamp) || 0;
+    const currentTimestamp = Number(newPoint.timestamp) || Date.now();
+    const timeSinceLastPoint = currentTimestamp - previousTimestamp;
+
+    if (timeSinceLastPoint < MIN_TIME_BETWEEN_POINTS_MS) {
+        return false;
+    }
+
+    const pointDistance = distanceMeters(previousPoint, newPoint);
+    const elapsedSeconds = timeSinceLastPoint > 0 ? (timeSinceLastPoint / 1000) : 0;
+    if (elapsedSeconds > 0) {
+        const estimatedSpeedMetersPerSecond = pointDistance / elapsedSeconds;
+        if (estimatedSpeedMetersPerSecond > MAX_REASONABLE_SPEED_MPS) {
+            return false;
+        }
+    }
+    const newAccuracy = typeof newPoint.accuracy === "number" ? newPoint.accuracy : 0;
+    const previousAccuracy = typeof previousPoint.accuracy === "number" ? previousPoint.accuracy : 0;
+    const noiseRadius = Math.max(newAccuracy, previousAccuracy) * ACCURACY_DISTANCE_MULTIPLIER;
+    const effectiveMinDistance = Math.max(MIN_POINT_DISTANCE_M, noiseRadius);
+
+    if (pointDistance < effectiveMinDistance) {
+        return timeSinceLastPoint > RECENT_POINT_WINDOW_MS;
+    }
+
+    if (typeof newPoint.speed === "number" && newPoint.speed >= 0 && newPoint.speed < MIN_MOVEMENT_SPEED_MPS) {
+        return timeSinceLastPoint > RECENT_POINT_WINDOW_MS;
+    }
+
+    return true;
+}
+
+function perpendicularDistanceMeters(point, lineStart, lineEnd) {
+    const latitudeToMeters = 111320;
+    const averageLatitudeRadians = (lineStart.lat + lineEnd.lat) * Math.PI / 360;
+    const longitudeToMeters = 111320 * Math.cos(averageLatitudeRadians);
+    const startX = lineStart.lon * longitudeToMeters;
+    const startY = lineStart.lat * latitudeToMeters;
+    const endX = lineEnd.lon * longitudeToMeters;
+    const endY = lineEnd.lat * latitudeToMeters;
+    const pointX = point.lon * longitudeToMeters;
+    const pointY = point.lat * latitudeToMeters;
+    const segmentDx = endX - startX;
+    const segmentDy = endY - startY;
+    const segmentLengthSquared = segmentDx * segmentDx + segmentDy * segmentDy;
+    if (segmentLengthSquared === 0) {
+        const dx = pointX - startX;
+        const dy = pointY - startY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    const numerator = Math.abs(segmentDy * pointX - segmentDx * pointY + endX * startY - endY * startX);
+    return numerator / Math.sqrt(segmentLengthSquared);
+}
+
+function simplifyPath(points, toleranceMeters) {
+    if (!Array.isArray(points) || points.length < 3) {
+        return Array.isArray(points) ? points.slice() : [];
+    }
+    const keepPointFlags = new Array(points.length).fill(false);
+    keepPointFlags[0] = true;
+    keepPointFlags[points.length - 1] = true;
+    const segmentStack = [[0, points.length - 1]];
+    while (segmentStack.length > 0) {
+        const [startIndex, endIndex] = segmentStack.pop();
+        let maxDistance = 0;
+        let maxDistanceIndex = -1;
+        for (let pointIndex = startIndex + 1; pointIndex < endIndex; pointIndex += 1) {
+            const perpendicular = perpendicularDistanceMeters(points[pointIndex], points[startIndex], points[endIndex]);
+            if (perpendicular > maxDistance) {
+                maxDistance = perpendicular;
+                maxDistanceIndex = pointIndex;
+            }
+        }
+        if (maxDistance > toleranceMeters && maxDistanceIndex !== -1) {
+            keepPointFlags[maxDistanceIndex] = true;
+            segmentStack.push([startIndex, maxDistanceIndex]);
+            segmentStack.push([maxDistanceIndex, endIndex]);
+        }
+    }
+    const simplifiedPoints = [];
+    for (let pointIndex = 0; pointIndex < points.length; pointIndex += 1) {
+        if (keepPointFlags[pointIndex]) simplifiedPoints.push(points[pointIndex]);
+    }
+    return simplifiedPoints;
+}
+
+function appendToHistory(history, position) {
+    const lastPoint = history.length > 0 ? history[history.length - 1] : null;
+    if (!isValidCandidate(position, lastPoint)) {
+        return { history: history, added: false };
+    }
+    history.push(position);
+    if (history.length % SIMPLIFY_EVERY_N_POINTS === 0) {
+        history = simplifyPath(history, SIMPLIFY_TOLERANCE_M);
+    }
+    if (history.length > MAX_HISTORY) {
+        history = history.slice(-MAX_HISTORY);
+    }
+    return { history: history, added: true };
+}
+
+function stabilizePositionForStationaryDevice(nextPosition, previousPosition) {
+    if (!nextPosition || !previousPosition) {
+        return nextPosition;
+    }
+    const hasNextCoordinates = typeof nextPosition.lat === "number" && typeof nextPosition.lon === "number";
+    const hasPreviousCoordinates = typeof previousPosition.lat === "number" && typeof previousPosition.lon === "number";
+    if (!hasNextCoordinates || !hasPreviousCoordinates) {
+        return nextPosition;
+    }
+
+    const pointDistance = distanceMeters(previousPosition, nextPosition);
+    const speedValue = typeof nextPosition.speed === "number" && nextPosition.speed >= 0 ? nextPosition.speed : null;
+    const accuracyValue = typeof nextPosition.accuracy === "number" && nextPosition.accuracy >= 0 ? nextPosition.accuracy : null;
+    const isSlowOrStanding = speedValue !== null
+        ? speedValue <= STATIONARY_SPEED_THRESHOLD_MPS
+        : pointDistance <= STATIONARY_DRIFT_RADIUS_M;
+    const accuracyIsGoodEnough = accuracyValue === null || accuracyValue <= STATIONARY_MAX_ACCURACY_M;
+    const driftRadius = Math.max(
+        STATIONARY_DRIFT_RADIUS_M,
+        (accuracyValue !== null ? accuracyValue : 0) * ACCURACY_DISTANCE_MULTIPLIER
+    );
+    const shouldFreezeMarkerPosition = isSlowOrStanding && accuracyIsGoodEnough && pointDistance <= driftRadius;
+
+    if (!shouldFreezeMarkerPosition) {
+        return nextPosition;
+    }
+
+    return {
+        user: nextPosition.user,
+        device: nextPosition.device,
+        key: nextPosition.key,
+        lat: previousPosition.lat,
+        lon: previousPosition.lon,
+        accuracy: nextPosition.accuracy,
+        speed: nextPosition.speed,
+        heading: nextPosition.heading,
+        battery: nextPosition.battery,
+        timestamp: nextPosition.timestamp,
+        receivedAt: nextPosition.receivedAt
+    };
+}
+
+let raw = msg.payload;
+if (Buffer.isBuffer(raw)) raw = raw.toString("utf8");
+
+let p;
+if (typeof raw === "string") {
+    try {
+        p = JSON.parse(raw);
+    } catch (err) {
+        node.warn("Tracking-logik: ungültiges JSON");
+        return null;
+    }
+} else if (raw && typeof raw === "object") {
+    p = raw;
+} else {
+    return null;
+}
+
+const topicParts = (msg.topic || "").split("/").filter(function (segment) {
+    return segment.length > 0;
+});
+
+let username = "";
+let deviceId = "";
+if (topicParts.length >= 3) {
+    username = topicParts[1];
+    deviceId = topicParts[2];
+} else if (topicParts.length === 2) {
+    username = topicParts[0];
+    deviceId = topicParts[1];
+}
+
+let lat = NaN;
+let lon = NaN;
+let accuracy = null;
+let speed = null;
+let heading = null;
+let battery = null;
+let timestamp = Date.now();
+const receivedAt = Date.now();
+const isOwntracks = p._type === "location";
+
+if (isOwntracks) {
+    lat = asNumber(p.lat);
+    lon = asNumber(p.lon);
+    accuracy = p.acc !== undefined ? asNumber(p.acc) : null;
+    speed = p.vel !== undefined ? asNumber(p.vel) : null;
+    heading = p.cog !== undefined ? asNumber(p.cog) : null;
+    battery = p.batt !== undefined ? asNumber(p.batt) : null;
+    timestamp = p.tst ? asNumber(p.tst) * 1000 : Date.now();
+    if (p.tid && typeof p.tid === "string") {
+        deviceId = deviceId || p.tid;
+    }
+    if (!username && typeof p.topic === "string") {
+        const sub = p.topic.split("/");
+        if (sub.length >= 2) {
+            username = sub[0];
+            deviceId = deviceId || sub[1];
+        }
+    }
+} else {
+    const coords = p.coords && typeof p.coords === "object" ? p.coords : null;
+    lat = asNumber(p.lat != null ? p.lat : p.latitude);
+    lon = asNumber(p.lon != null ? p.lon : p.longitude);
+    if (coords && (isNaN(lat) || isNaN(lon))) {
+        lat = asNumber(coords.lat != null ? coords.lat : coords.latitude);
+        lon = asNumber(coords.lon != null ? coords.lon : (coords.longitude != null ? coords.longitude : coords.lng));
+    }
+    username = username || (typeof p.user === "string" ? p.user : "");
+    deviceId = deviceId || (typeof p.device === "string" ? p.device : "") || (typeof p.name === "string" ? p.name : "");
+}
+
+const hasCoordinateNumbers = !isNaN(lat) && !isNaN(lon);
+if (hasCoordinateNumbers && (lat < -90 || lat > 90 || lon < -180 || lon > 180)) {
+    node.warn("Tracking-logik: lat/lon außerhalb des gültigen Bereichs");
+    return null;
+}
+if (!hasCoordinateNumbers) {
+    lat = null;
+    lon = null;
+}
+
+if (!deviceId) deviceId = "unknown";
+if (!username) username = "unknown";
+
+const key = `${username}/${deviceId}`;
+const position = {
+    user: username,
+    device: deviceId,
+    key: key,
+    lat: lat,
+    lon: lon,
+    accuracy: accuracy !== null && !isNaN(accuracy) ? accuracy : null,
+    speed: speed !== null && !isNaN(speed) ? speed : null,
+    heading: heading !== null && !isNaN(heading) ? heading : null,
+    battery: battery !== null && !isNaN(battery) ? battery : null,
+    timestamp: timestamp,
+    receivedAt: receivedAt
+};
+
+const previousLastPosition = global.get("lastPosition") || null;
+const stabilizedPosition = stabilizePositionForStationaryDevice(position, previousLastPosition);
+global.set("lastPosition", stabilizedPosition);
+
+let history = global.get("history") || [];
+let historyByDevice = global.get("historyByDevice") || {};
+let receivedCount = global.get("receivedCount") || 0;
+let receivedCountByDevice = global.get("receivedCountByDevice") || {};
+const trackingIsActive = !!global.get("trackingActive");
+
+if (!global.get("historyCleaned")) {
+    history = simplifyPath(history, SIMPLIFY_TOLERANCE_M);
+    if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
+    Object.keys(historyByDevice).forEach(function (deviceKey) {
+        let deviceHistory = historyByDevice[deviceKey] || [];
+        deviceHistory = simplifyPath(deviceHistory, SIMPLIFY_TOLERANCE_M);
+        if (deviceHistory.length > MAX_HISTORY) deviceHistory = deviceHistory.slice(-MAX_HISTORY);
+        historyByDevice[deviceKey] = deviceHistory;
+    });
+    global.set("historyCleaned", true);
+}
+
+if (stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
+    receivedCount += 1;
+    receivedCountByDevice[key] = (receivedCountByDevice[key] || 0) + 1;
+}
+
+if (trackingIsActive && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
+    const globalAppendResult = appendToHistory(history, stabilizedPosition);
+    history = globalAppendResult.history;
+
+    let deviceHistory = historyByDevice[key] || [];
+    const deviceAppendResult = appendToHistory(deviceHistory, stabilizedPosition);
+    historyByDevice[key] = deviceAppendResult.history;
+}
+
+global.set("history", history);
+global.set("historyByDevice", historyByDevice);
+global.set("receivedCount", receivedCount);
+global.set("receivedCountByDevice", receivedCountByDevice);
+
+let devices = global.get("devices") || {};
+devices[key] = stabilizedPosition;
+global.set("devices", devices);
+
+msg.payload = stabilizedPosition;
+return msg;

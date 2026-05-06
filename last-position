@@ -1,0 +1,8 @@
+let lastPosition = flow.get("lastPosition") || null;
+
+msg.payload = {
+    ok: true,
+    data: lastPosition
+};
+
+return msg;

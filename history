@@ -1,0 +1,14 @@
+let history = global.get("history") || [];
+let receivedCount = global.get("receivedCount");
+if (typeof receivedCount !== "number" || receivedCount < history.length) {
+    receivedCount = history.length;
+}
+
+msg.payload = {
+    ok: true,
+    count: history.length,
+    received: receivedCount,
+    data: history
+};
+
+return msg;

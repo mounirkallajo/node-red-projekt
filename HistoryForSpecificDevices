@@ -1,0 +1,15 @@
+let user = msg.req.params.user;
+let device = msg.req.params.device;
+let key = `${user}/${device}`;
+
+let historyByDevice = flow.get("historyByDevice") || {};
+let history = historyByDevice[key] || [];
+
+msg.payload = {
+    ok: true,
+    key: key,
+    count: history.length,
+    data: history
+};
+
+return msg;

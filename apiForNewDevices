@@ -1,0 +1,9 @@
+let devices = flow.get("devices") || {};
+
+msg.payload = {
+    ok: true,
+    count: Object.keys(devices).length,
+    data: devices
+};
+
+return msg;
