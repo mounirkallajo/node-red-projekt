@@ -37,3 +37,64 @@ Updated runtime `cameraPanelJs` script in `flow.json` so `/api/camera-panel.js` 
 Done
 Verified no remaining fixed-IP camera references and no `cameraHost` fallback dependencies tied to the old single-camera model.
 Prepared flow and client logic for restart-safe behavior by persisting camera registry in file-backed context when available.
+
+## Step 9 - per-camera-controller-and-status-rewrite
+Done
+Replaced the global stream/state in `camera-panel.js` with per-camera `CameraController` instances driven by an explicit state machine, fast direct-capture probe with `sessionStorage` transport cache, dedicated `<img>`/badge per camera, and clean open/close lifecycle (no more double-init race).
+Added optional `offUrl` field to `cameraRegistryAdd`/`cameraConfig` and a new `POST /api/camera/off` route in `flow.json` (graceful when no `offUrl` is configured), plus an Aus/Ein toggle in the panel header for client-side disconnect with optional firmware-side off call. Mirrored the new client into the embedded `cameraPanelJs` function.
+
+## Step 10 - external-stream-relay-hardening
+Done
+Replaced `/api/camera/stream` preparation logic in `flow.json` with a direct Node.js relay (`http` module) that pipes upstream MJPEG chunks from `<camera-host>:81/stream` straight to `msg.res` instead of buffering through the `http request` node chain.
+Configured relay response headers (`multipart/x-mixed-replace`, no-cache) and lifecycle cleanup on client disconnect/timeout to keep external access on live stream path instead of dropping to capture fallback.
+
+## Step 11 - proxy-stream-stability-tuning
+Done
+Reverted to the stable Node-RED stream proxy chain and tuned client proxy handling in `camera-panel.js` to avoid immediate fallback: separate longer proxy connect timeout, bounded proxy reconnect attempts, and reconnect delay before entering capture fallback.
+Enabled persistent upstream socket on `cameraStreamRequest` (`persist: true`) in `flow.json` and mirrored the updated client script back into `cameraPanelJs` to keep served runtime logic in sync.
+
+## Step 12 - external-snapshot-stream-mode
+Done
+Replaced multi-retry proxy MJPEG handling in `camera-panel.js` with a single 6 s proxy attempt, then a fast server-proxy snapshot loop (default 350 ms / ~3 FPS) presented as "Live über Server-Proxy (Snapshot)" so external clients always get a streaming experience even when MJPEG cannot be piped through Node-RED.
+Lowered server-side `fallbackIntervalMs` to 350 in `cameraConfig` (`flow.json`) and re-synced the client into the embedded `cameraPanelJs` function so the panel reliably serves live frames from anywhere via Tailscale routes without dropping to a slow capture-fallback label.
+
+## Step 13 - camera-location-metadata-and-tailscale-subnet
+Done
+Added Lokal/Extern radio selector to the add-camera dialog in `camera-panel.js`, a new `location` field in `addCameraOnServer`, an entry under the camera in the manage dialog, and matching CSS for the option group; documented the one-time Tailscale subnet-router setup (`tailscale set --advertise-routes=192.168.1.0/24` on the Raspberry plus admin approval) so external browsers reach local cameras directly via the Raspberry route.
+Extended `cameraRegistryAdd` and `cameraConfig` in `flow.json` with the sanitized `location` field (default `local`, otherwise `external`) and re-synced the embedded `cameraPanelJs` payload so the served runtime matches the source script.
+
+## Step 14 - location-priority-over-transport-cache
+Done
+Restructured `_beginConnect` in `camera-panel.js` to check the camera `location` (`local` / `external`) before consulting the cached `preferredTransport`, so any camera that the user explicitly placed in a Tailscale-reachable subnet always tries the direct MJPEG stream first regardless of stale session-cached fallback decisions; raised `connectTimeoutMs` to 12 s and `probeTimeoutMs` to 3 s to tolerate Tailscale relay latency.
+Re-synced the updated panel into the embedded `cameraPanelJs` function in `flow.json` and validated the whole flow parses cleanly so the Node-RED runtime now serves the new connect-priority behavior.
+
+## Step 15 - tailscale-route-diagnostic-and-proxy-stability
+Done
+Added a per-camera `directRouteFailed` flag plus a dedicated hint element (orange overlay) in `camera-panel.js` that surfaces a clear "Tailscale-Subnet auf diesem Gerät akzeptieren" tip whenever a `local`/`external` camera's direct stream fails and the controller falls back to proxy/snapshot, so the user sees actionable diagnostics in the UI rather than just a silent fallback.
+Reverted `cameraStreamRequest`'s `persist` flag back to `false` in `flow.json` (persistent upstream sockets were blocking the ESP32-CAM's single MJPEG slot and producing `no response from server`) and re-synced the embedded `cameraPanelJs` runtime to keep the served script in lockstep with the source.
+
+## Step 16 - location-aware-status-and-off-url-cleanup
+Done
+Refactored badge text in `camera-panel.js` to compose location-aware status labels via `composeBadgeText(state, location)` so streaming states render as "Stream aktiv (intern)" / "Stream aktiv (extern)" / "Stream aktiv (Server-Proxy) (intern|extern)" / "Snapshot-Stream (intern|extern)" instead of a generic "Direktstream aktiv".
+Removed the Off-URL input from the add-camera dialog (stock Espressif CameraWebServer firmware exposes no power-off endpoint; the panel-side Aus/Ein toggle already stops upstream traffic) and re-synced the embedded `cameraPanelJs` so the runtime UI matches the simplified source.
+
+## Step 17 - remove-off-route-completely
+Done
+Deleted all `/api/camera/off` infrastructure in `flow.json` (`cam_off_http_in_8a1b22`, `cam_off_fn_8a1b23`, `cam_off_http_req_8a1b24`, `cam_off_finalize_8a1b25`, `cam_off_http_resp_8a1b26`) plus removed `offUrl`/`onUrl` from both `cameraRegistryAdd` and `cameraConfig`, leaving the registry purely focused on host/location metadata.
+Removed `callOffEndpointOnServer` and its invocation from `camera-panel.js` so `turnOff` now only suspends the controller and transitions to the Off state without any server round-trip; re-synced the embedded `cameraPanelJs` payload to match.
+
+## Step 18 - camera-dialog-popout-window-button
+Done
+Added a new header button (`↗`) in `camera-panel.js` that opens the camera dialog in a separate browser window via `?cameraDialog=1`, so camera management can be moved out of the map tab and no longer overlays the main map view.
+Implemented dialog-only window mode (hides map, stretches panel fullscreen-ish, auto-opens panel, hides popout button in that window) and mirrored the updated script into `flow.json` (`cameraPanelJs`) so served runtime behavior matches source.
+
+## Step 19 - popout-click-turns-stream-off-and-closes-main-dialog
+Done
+Updated the popout click logic in `camera-panel.js` so pressing `↗` now first turns off all active camera controllers (`turnOffAllControllers()`), then closes the panel on the map (`closePanel()`), and only then opens the separate popout window.
+Re-synced the updated panel script into `flow.json` (`cameraPanelJs`) and validated JSON parsing to keep deployed runtime behavior aligned with the source file.
+
+## Step 20 - move-popout-button-top-right
+Done
+Moved the `↗` popout button in `camera-panel.js` from the left control cluster to the right side of the header by placing it after the spacer, so it appears at the top-right position as requested.
+Re-synced the updated camera panel source into `flow.json` (`cameraPanelJs`) and validated flow JSON parsing.
+
