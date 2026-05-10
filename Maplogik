@@ -366,6 +366,13 @@
       margin-right: 10px;
       transform: translateY(-50%);
     }
+    .leaflet-top.leaflet-right .leaflet-control-rotate.leaflet-bar {
+      margin-bottom: 6px;
+    }
+    .leaflet-top.leaflet-right .leaflet-control-zoom.leaflet-bar a.leaflet-control-zoom-in {
+      margin-bottom: 6px;
+      border-bottom: none !important;
+    }
     .search-panel {
       position: absolute;
       top: 54px;
@@ -380,10 +387,19 @@
       display: none;
     }
     .search-panel.open { display: block; }
+    .route-action-buttons {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      flex-shrink: 0;
+    }
     .map-search-row {
       display: flex;
       gap: 8px;
       align-items: center;
+    }
+    .search-panel > .map-search-row + .map-search-row {
+      margin-top: 10px;
     }
     .search-input-wrap {
       position: relative;
@@ -917,7 +933,10 @@
           <svg viewBox="0 0 24 24"><circle cx="6.1" cy="16.9" r="3.2"/><circle cx="17.9" cy="16.9" r="3.2"/><path d="M9.2 16.9l3.2-5.3h3"/><path d="M10 10.3h2.7"/><path d="M12.4 11.6l2.5 5.3"/><path d="M9.2 16.9h5.7"/></svg>
         </button>
       </div>
-      <button id="routeClearBtn" class="button button-route action-equal-btn" type="button" title="Route beenden">×</button>
+      <div class="route-action-buttons">
+        <button id="routeClearBtn" class="button button-route action-equal-btn" type="button" title="Route beenden">×</button>
+        <button id="searchPanelResetAllBtn" class="button button-route action-equal-btn" type="button" title="Alle Eingaben zurücksetzen (Start, Ziel, Zwischenstopps)">&#128465;</button>
+      </div>
       <div id="routeInfoInline" class="route-inline-info">
         <div class="route-inline-item" title="Distanz">
           <span class="route-inline-icon">
@@ -1053,7 +1072,8 @@
     const OWNTRACKS_LOCATION_POLL_INTERVAL_MS = 100;
     const OWNTRACKS_LOCATION_WAIT_MAX_MS = 20000;
     const OWNTRACKS_LOCATE_BUTTON_MAX_WAIT_MS = 7000;
-    const AUTO_FOLLOW_RESUME_AFTER_IDLE_MS = 10000;
+    const AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_CLOSED = 20000;
+    const AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_SEARCH_OPEN = 60000;
     const AUTO_FOLLOW_MIN_PAN_DISTANCE_METERS = 3;
     const AUTO_FOLLOW_PAN_DURATION_SECONDS = 0.9;
     const OWNTRACKS_STATUS_PROBE_INTERVAL_MS = 20000;
@@ -1746,7 +1766,13 @@
         if (state.lastKnownCurrentLatLng) {
           followCurrentPositionOnMap(state.lastKnownCurrentLatLng, true);
         }
-      }, AUTO_FOLLOW_RESUME_AFTER_IDLE_MS);
+      }, getAutoFollowResumeDelayMs());
+    }
+
+    function rescheduleAutoFollowResumeIfMapFollowPaused() {
+      if (!state.autoFollowEnabled) {
+        scheduleAutoFollowResume();
+      }
     }
 
     function disableAutoFollowTemporarilyByUserInteraction() {
@@ -3893,6 +3919,53 @@
       };
     }
 
+    function updateMapViewForRouteSearchEndpoints() {
+      if (!state.map) {
+        return;
+      }
+      const startPoint = state.selectedRouteStart;
+      const hasNumericStart = startPoint &&
+        typeof startPoint.lat === 'number' &&
+        typeof startPoint.lon === 'number' &&
+        Number.isFinite(startPoint.lat) &&
+        Number.isFinite(startPoint.lon);
+
+      let destinationLatitude = NaN;
+      let destinationLongitude = NaN;
+      if (state.destinationMarker && typeof state.destinationMarker.getLatLng === 'function') {
+        const destinationLatLng = state.destinationMarker.getLatLng();
+        destinationLatitude = destinationLatLng.lat;
+        destinationLongitude = destinationLatLng.lng;
+      }
+      const hasNumericDestination = Number.isFinite(destinationLatitude) && Number.isFinite(destinationLongitude);
+
+      if (hasNumericStart && hasNumericDestination) {
+        const routeSearchBounds = L.latLngBounds(
+          [startPoint.lat, startPoint.lon],
+          [destinationLatitude, destinationLongitude]
+        );
+        const southWestCorner = routeSearchBounds.getSouthWest();
+        const northEastCorner = routeSearchBounds.getNorthEast();
+        const startAndDestinationCoincide =
+          Math.abs(southWestCorner.lat - northEastCorner.lat) < 1e-9 &&
+          Math.abs(southWestCorner.lng - northEastCorner.lng) < 1e-9;
+        if (startAndDestinationCoincide) {
+          state.map.setView([startPoint.lat, startPoint.lon], 16);
+        } else {
+          state.map.fitBounds(routeSearchBounds, { padding: [48, 48], maxZoom: 16 });
+        }
+        return;
+      }
+      if (hasNumericDestination) {
+        state.map.setView([destinationLatitude, destinationLongitude], 16);
+        return;
+      }
+      if (hasNumericStart) {
+        const preservedZoom = typeof state.map.getZoom === 'function' ? state.map.getZoom() : 15;
+        state.map.setView([startPoint.lat, startPoint.lon], Math.max(preservedZoom, 14));
+      }
+    }
+
     function renderRouteStartMarker() {
       if (!state.map) {
         return;
@@ -3912,6 +3985,7 @@
         icon: createRouteLabelIcon('S', 'route-label-marker-a')
       }).addTo(state.map);
       state.startMarker.bindPopup('S (Start): ' + (startEntry.label || ''));
+      updateMapViewForRouteSearchEndpoints();
     }
 
     function updateStartInlineClearButtonVisibility() {
@@ -4065,7 +4139,7 @@
       }).addTo(state.map);
       state.destinationMarker.bindPopup('A (Ziel): ' + destination.label);
       renderRouteStartMarker();
-      state.map.setView([destination.lat, destination.lon], 16);
+      updateMapViewForRouteSearchEndpoints();
       updateRouteActionVisibility();
     }
 
@@ -4577,11 +4651,14 @@
       state.selectedRouteSuggestion = null;
       state.selectedWaypointSuggestion = null;
       state.selectedRouteStart = null;
+      state.activeSearchTarget = null;
       hideRouteSuggestions();
       hideWaypointSuggestions();
       clearRouteVisualization();
       updateInlineClearButtonVisibility();
       updateStartInlineClearButtonVisibility();
+      updateWaypointButtonState();
+      updateRouteLetterBadgesVisibility();
     }
 
 
@@ -5531,6 +5608,12 @@
       return !!(searchPanelElement && searchPanelElement.classList.contains('open'));
     }
 
+    function getAutoFollowResumeDelayMs() {
+      return isSearchPanelOpen()
+        ? AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_SEARCH_OPEN
+        : AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_CLOSED;
+    }
+
     function hasActiveSearchTarget() {
       return !!(state.activeSearchTarget && state.activeSearchTarget.kind);
     }
@@ -6344,6 +6427,7 @@
         searchPanelElement.classList.add('open');
       }
       updateDialogLayout();
+      rescheduleAutoFollowResumeIfMapFollowPaused();
       displayDestination(destination);
       const routeApplied = await applyRouteFromCurrentServerPositionToDestinationIfAvailable(destination);
       if (!routeApplied) {
@@ -6700,6 +6784,7 @@
         hideRouteSuggestions();
       }
       updateDialogLayout();
+      rescheduleAutoFollowResumeIfMapFollowPaused();
     }
 
     function toggleControlPanel() {
@@ -6723,6 +6808,7 @@
 
       controlPanelElement.classList.toggle('hidden');
       updateDialogLayout();
+      rescheduleAutoFollowResumeIfMapFollowPaused();
     }
 
     async function centerOnCurrentLocation() {
@@ -7218,6 +7304,9 @@
         });
       }
       bindClickIfPresent(clearSearchInlineButton, clearSearchInputAndMap);
+      bindClickIfPresent(byId('searchPanelResetAllBtn'), function () {
+        clearSearchInputAndMap();
+      });
       bindClickIfPresent(mapStyleToggleButton, toggleMapStyle);
       if (routeQueryElement) {
         const setDestinationTarget = function () {

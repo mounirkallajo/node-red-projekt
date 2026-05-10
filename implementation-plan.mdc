@@ -123,3 +123,27 @@ Done
 Rewrote `apiForNewDevice` (`flow.json` `1ecd66ddf2a0a1cc`) so `GET /api/devices` returns only `global.devices` entries with valid coordinates whose `receivedAt` is on or after `global.__trackingSessionEpoch`; dropped merging `lastGoodPositionByDevice` into that list so stale or file-restored “ghost” devices no longer appear as selectable rows after deploy.
 `Tracking-Logik` `initialize` now sets `__trackingSessionEpoch` to the same `Date.now()` tick as the silence window and clears `devices` / `lastGoodPositionByDevice` / `lastPosition` first, so the map’s device list stays empty until a post-deploy MQTT point is accepted (UI “Verbunden” still follows `receivedAt` freshness in `Maplogik`).
 
+## Step 39 - route-start-marker-map-view
+Done
+Added `updateMapViewForRouteSearchEndpoints()` in `Maplogik` so after a fixed start (`selectedRouteStart`) the map pans or `fitBounds` to include start and destination markers instead of leaving the S marker off-screen.
+Replaced `displayDestination`’s unconditional `setView` on the destination with the shared helper so start and goal are both visible when a custom start is set; mirrored the same script into the embedded map `template` in `flow.json`.
+
+## Step 40 - auto-follow-resume-delay-by-search-panel
+Done
+Split the idle auto-follow resume delay into `AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_CLOSED` (20 s) and `AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_SEARCH_OPEN` (60 s) and wired `scheduleAutoFollowResume` through `getAutoFollowResumeDelayMs()` using `isSearchPanelOpen()`.
+Added `rescheduleAutoFollowResumeIfMapFollowPaused()` on search panel toggle, control panel toggle (search closes), and route-from-place-sheet so opening or closing the search UI resets the pending resume timer to the correct delay; re-synced the main map `template` in `flow.json` from `Maplogik`.
+
+## Step 41 - leaflet-right-control-vertical-gap
+Done
+Added a small vertical gap between the rotate and zoom control blocks on the top-right stack and separated the zoom-in link from the zoom-out link inside the Leaflet zoom bar (`margin-bottom` / `border-bottom` reset).
+Re-synced the map `template` in `flow.json` from `Maplogik`.
+
+## Step 42 - search-panel-route-row-vertical-gap
+Done
+Added `margin-top` between consecutive `.map-search-row` blocks inside `.search-panel` so the purple start (`useCurrentAsStartBtn`) and destination (`searchBtn`) action columns no longer sit flush when the search dialog is open.
+Re-synced the map `template` in `flow.json` from `Maplogik`.
+
+## Step 43 - search-panel-reset-trash-beside-route-clear
+Done
+Replaced the temporary `<details>` menu with a single trash (`&#128465;`) action button beside `routeClearBtn` in `routeActionsRow`, grouped in `.route-action-buttons`, still calling `clearSearchInputAndMap()` for a full search/route reset.
+Re-synced the map `template` in `flow.json` from `Maplogik`.
