@@ -221,6 +221,17 @@
       margin-right: 6px;
       color: #90a4ae;
     }
+    .suggestion-item.is-my-location {
+      color: #0d3a6b;
+      font-weight: 600;
+      background: #f4f9ff;
+      border-bottom: 1px solid #d8e6f5;
+    }
+    .suggestion-item.is-my-location::before {
+      content: '\25C9';
+      margin-right: 6px;
+      color: #1f78d1;
+    }
     .suggestion-item mark {
       background: #fff59d;
       color: inherit;
@@ -342,7 +353,13 @@
       background: #f39c12;
     }
     .device-facing-marker-layer { background: none; border: none; }
-    .device-facing-marker { line-height: 0; pointer-events: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.28)); }
+    .device-facing-marker {
+      line-height: 0;
+      pointer-events: none;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.28));
+      width: 48px;
+      height: 48px;
+    }
     .device-facing-marker svg { display: block; }
     .leaflet-top.leaflet-right .leaflet-control-zoom {
       margin-top: 50vh;
@@ -596,6 +613,263 @@
       margin-bottom: 0;
       background: rgba(255, 255, 255, 0.96);
     }
+    .place-sheet {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 1200;
+      max-height: 92vh;
+      background: #ffffff;
+      border-top-left-radius: 16px;
+      border-top-right-radius: 16px;
+      box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+      transform: translateY(100%);
+      transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+      display: flex;
+      flex-direction: column;
+      will-change: transform;
+      touch-action: none;
+    }
+    .place-sheet.dragging {
+      transition: none;
+    }
+    .place-sheet.collapsed {
+      transform: translateY(calc(100% - 200px));
+    }
+    .place-sheet.half {
+      transform: translateY(45%);
+    }
+    .place-sheet.expanded {
+      transform: translateY(0);
+    }
+    .place-sheet-handle {
+      width: 100%;
+      padding: 8px 0 4px;
+      display: flex;
+      justify-content: center;
+      cursor: grab;
+      flex: none;
+    }
+    .place-sheet-handle::before {
+      content: '';
+      display: block;
+      width: 44px;
+      height: 4px;
+      border-radius: 999px;
+      background: #c2ccd6;
+    }
+    .place-sheet.dragging .place-sheet-handle {
+      cursor: grabbing;
+    }
+    .place-sheet-content {
+      display: flex;
+      flex-direction: column;
+      padding: 0 16px 16px;
+      gap: 10px;
+      overflow: hidden;
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .place-sheet-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .place-sheet-header-actions {
+      display: flex;
+      flex-direction: row-reverse;
+      align-items: flex-start;
+      gap: 6px;
+      flex: none;
+    }
+    .place-sheet-toggle {
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: 999px;
+      background: #f1f4f7;
+      color: #46586a;
+      cursor: pointer;
+      flex: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition: background 120ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .place-sheet-toggle:hover {
+      background: #e3e9ef;
+    }
+    .place-sheet-toggle svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+      transform-origin: center center;
+    }
+    .place-sheet-toggle.place-sheet-toggle-open svg {
+      transform: rotate(180deg);
+    }
+    .place-sheet-title {
+      flex: 1;
+      font-size: 15px;
+      font-weight: 700;
+      color: #1e2a32;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .place-sheet-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: 999px;
+      background: #f1f4f7;
+      color: #46586a;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      flex: none;
+    }
+    .place-sheet-close:hover {
+      background: #e3e9ef;
+    }
+    .place-sheet-body {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      font-size: 13px;
+      color: #2c3a47;
+      padding-right: 4px;
+      min-height: 0;
+    }
+    .place-sheet-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      padding: 6px 0;
+      border-bottom: 1px solid #eef2f5;
+    }
+    .place-sheet-row:last-child {
+      border-bottom: none;
+    }
+    .place-sheet-row-icon {
+      flex: none;
+      width: 22px;
+      text-align: center;
+      color: #1f78d1;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    .place-sheet-row-content {
+      flex: 1;
+      min-width: 0;
+      word-break: break-word;
+    }
+    .place-sheet-row-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #6b7d8c;
+      margin-bottom: 2px;
+    }
+    .place-sheet-row-value {
+      font-size: 13px;
+      color: #1e2a32;
+      line-height: 1.45;
+    }
+    .place-sheet-row-value a {
+      color: #1f78d1;
+      text-decoration: none;
+    }
+    .place-sheet-row-value a:hover {
+      text-decoration: underline;
+    }
+    .place-sheet-loading {
+      padding: 6px 0;
+      color: #6b7d8c;
+      font-style: italic;
+    }
+    .place-sheet-extras-toggle {
+      margin-top: 4px;
+      border: 1px solid #d6dde3;
+      background: #fafbfc;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+      color: #46586a;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+    }
+    .place-sheet-extras-list {
+      display: none;
+      margin: 6px 0 0;
+      padding: 8px;
+      background: #f7f9fb;
+      border: 1px solid #e3e8ed;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #2c3a47;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .place-sheet-extras-list.open {
+      display: block;
+    }
+    .place-sheet-extras-list .extras-row {
+      display: flex;
+      gap: 8px;
+      padding: 3px 0;
+      border-bottom: 1px dashed #e3e8ed;
+    }
+    .place-sheet-extras-list .extras-row:last-child {
+      border-bottom: none;
+    }
+    .place-sheet-extras-list .extras-key {
+      flex: 0 0 38%;
+      color: #6b7d8c;
+      font-weight: 600;
+      word-break: break-word;
+    }
+    .place-sheet-extras-list .extras-value {
+      flex: 1;
+      word-break: break-word;
+    }
+    .place-sheet-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      flex: none;
+    }
+    .place-sheet-actions .button {
+      margin-bottom: 0;
+      flex: 1;
+      min-width: 120px;
+    }
+    .place-sheet[aria-hidden="true"] {
+      pointer-events: none;
+    }
+    .place-sheet:not([aria-hidden="true"]) {
+      pointer-events: auto;
+    }
+    .longpress-marker-icon {
+      background: none;
+      border: none;
+    }
+    .longpress-marker-pin {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #1f78d1;
+      border: 3px solid #ffffff;
+      box-shadow: 0 2px 8px rgba(31, 120, 209, 0.45);
+      transform: translateY(0);
+    }
   </style>
 </head>
 <body>
@@ -612,6 +886,14 @@
   <div id="cameraPanelHost"></div>
 
   <div id="searchPanel" class="search-panel">
+    <div class="map-search-row">
+      <div id="routeStartLetterBadge" class="waypoint-index-badge route-letter-badge" title="Start">S</div>
+      <div class="search-input-wrap">
+        <input id="routeStartQuery" class="text-input" type="text" placeholder="Start (Mein Standort)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" name="mapRouteStartQuery" />
+        <button id="clearStartInlineBtn" class="search-clear-btn" type="button" title="Start leeren">×</button>
+      </div>
+      <button id="useCurrentAsStartBtn" class="button button-route action-equal-btn" type="button" title="Mein Standort als Start verwenden">&#9678;</button>
+    </div>
     <div class="map-search-row">
       <div id="routeDestinationLetterBadge" class="waypoint-index-badge route-letter-badge route-letter-badge-off" title="Ziel">A</div>
       <div class="search-input-wrap">
@@ -722,6 +1004,29 @@
   <div id="map"></div>
   <div id="locateLoadingBadge" class="locate-loading-badge">Standort wird geladen...</div>
 
+  <div id="placeBottomSheet" class="place-sheet" role="dialog" aria-hidden="true" aria-labelledby="placeSheetTitle">
+    <div class="place-sheet-handle" id="placeSheetHandle" aria-hidden="true"></div>
+    <div class="place-sheet-content">
+      <div class="place-sheet-header">
+        <div id="placeSheetTitle" class="place-sheet-title">Ort</div>
+        <div class="place-sheet-header-actions">
+          <button id="placeSheetCloseBtn" class="place-sheet-close" type="button" aria-label="Schließen">&times;</button>
+          <button id="placeSheetToggleExpandBtn" class="place-sheet-toggle" type="button"
+            aria-expanded="false" aria-controls="placeSheetBody" title="Ausklappen" aria-label="Dialog ausklappen">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 14l-6-6-6 6"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div id="placeSheetBody" class="place-sheet-body"></div>
+      <div class="place-sheet-actions">
+        <button id="placeSheetRouteBtn" class="button button-route" type="button">Route hierhin</button>
+        <button id="placeSheetMarkBtn" class="button button-mark" type="button">Als Ort speichern</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
   <script src="/api/camera-panel.js"></script>
@@ -732,13 +1037,18 @@
     const CONNECTION_TIMEOUT_MS = 10000;
     const CONNECTION_CONNECTED_THRESHOLD_MS = 10000;
     const CONNECTION_DISCONNECTED_THRESHOLD_MS = 10000;
-    const ROUTE_MAX_REASONABLE_SPEED_MPS = 22;
+    const ROUTE_MAX_INSTANT_SPEED_MPS = 70;
+    const ROUTE_MAX_SPEED_JUMP_MPS = 14;
+    const ROUTE_STATIONARY_SPEED_BASELINE_MPS = 1.5;
+    const ROUTE_STATIONARY_HIGH_SPEED_FACTOR = 2.0;
+    const ROUTE_RECENT_SPEED_WINDOW_SIZE = 5;
     const ROUTE_MIN_POINT_DISTANCE_METERS = 2;
     const FAILSAFE_RETURN_TRANSPORT_MODE = 'driving';
     const ROUTE_INPUT_DEBOUNCE_MS = 250;
     const SUGGESTION_RENDER_BATCH_SIZE = 40;
     const RECENT_SUGGESTIONS_STORAGE_KEY = 'mapRecentRouteSuggestions';
     const RECENT_SUGGESTIONS_MAX_ENTRIES = 10;
+    const LAST_HEADING_BY_DEVICE_STORAGE_KEY = 'mapLastHeadingByDeviceKey';
     const LOCATE_BUTTON_ACTIVE_MS = 400;
     const OWNTRACKS_LOCATION_POLL_INTERVAL_MS = 100;
     const OWNTRACKS_LOCATION_WAIT_MAX_MS = 20000;
@@ -754,6 +1064,37 @@
     const LIVE_TRACKING_RECONNECT_MAX_MS = 10000;
     const MARKER_MOVE_MIN_DURATION_MS = 500;
     const MARKER_MOVE_MAX_DURATION_MS = 1800;
+    const MAP_LONG_PRESS_DURATION_MS = 500;
+    const MAP_LONG_PRESS_MAX_MOVEMENT_PIXELS = 12;
+    const PLACE_SHEET_COLLAPSED_TOP_OFFSET_PX = 200;
+
+    function loadLastHeadingsFromStorage() {
+      const resultByKey = {};
+      try {
+        const rawJson = localStorage.getItem(LAST_HEADING_BY_DEVICE_STORAGE_KEY);
+        if (!rawJson) {
+          return resultByKey;
+        }
+        const parsedRecord = JSON.parse(rawJson);
+        if (!parsedRecord || typeof parsedRecord !== 'object' || Array.isArray(parsedRecord)) {
+          return resultByKey;
+        }
+        Object.keys(parsedRecord).forEach(function (deviceKey) {
+          if (!deviceKey || typeof deviceKey !== 'string') {
+            return;
+          }
+          const rawValue = parsedRecord[deviceKey];
+          const numericHeading = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+          if (!Number.isFinite(numericHeading)) {
+            return;
+          }
+          resultByKey[deviceKey] = ((numericHeading % 360) + 360) % 360;
+        });
+      } catch (storageReadError) {
+        console.warn('Konnte gespeicherte Karten-Richtungen nicht lesen:', storageReadError);
+      }
+      return resultByKey;
+    }
 
     const state = {
       map: null,
@@ -827,6 +1168,7 @@
       owntracksStatusProbeFailureTitleByKey: {},
       currentMarkerAnimationFrame: null,
       latestHeadingDegrees: null,
+      lastHeadingDegreesByDeviceKey: loadLastHeadingsFromStorage(),
       failsafeReturnMarker: null,
       failsafeBreakNoticeShownByKey: {},
       failsafeReturnRouteLine: null,
@@ -834,7 +1176,14 @@
       failsafeRouteRequestInFlight: false,
       failsafeReturnMarkersByKey: {},
       failsafeReturnRouteLinesByKey: {},
-      failsafeRouteRequestInFlightByKey: {}
+      failsafeRouteRequestInFlightByKey: {},
+      activeSearchTarget: null,
+      selectedRouteStart: null,
+      longPressMarker: null,
+      placeSheetCurrentPoint: null,
+      placeSheetSnapState: 'collapsed',
+      placeSheetDragging: false,
+      placeSheetSuppressNextMapClick: false
     };
 
     const MAX_WAYPOINT_STOPS = 5;
@@ -1165,11 +1514,18 @@
         removeMarkerIfWrongType(deviceKey, true);
         const entry = state.devicesByKey[deviceKey];
         const popupLabel = getHumanDeviceLabel(deviceKey, entry);
-        const heading = normalizeHeadingDegrees(entry && entry.heading);
-        const icon = createCurrentPositionIcon(deviceKey, heading);
+        const nh = normalizeHeadingDegrees(entry && entry.heading);
+        rememberHeadingForDeviceKey(deviceKey, nh);
+        const eff = effectiveHeadingForDeviceDisplay(deviceKey, nh);
+        const icon = createCurrentPositionIcon(deviceKey, eff);
         let m = state.allDeviceMarkersByKey[deviceKey];
         if (!m) {
-          m = L.marker(markerLatLng, { icon: icon, zIndexOffset: 2000 }).addTo(state.map);
+          m = L.marker(markerLatLng, {
+            icon: icon,
+            zIndexOffset: 2000,
+            rotateWithView: true,
+            rotation: 0
+          }).addTo(state.map);
           state.allDeviceMarkersByKey[deviceKey] = m;
         } else {
           m.setLatLng(markerLatLng);
@@ -1218,6 +1574,9 @@
           delete state.allDeviceMarkersByKey[deviceKey];
         }
       });
+      if (typeof performBearingSyncNow === 'function') {
+        performBearingSyncNow();
+      }
     }
 
     function renderAllDeviceMarkers() {
@@ -1589,7 +1948,7 @@
       byId('otLat').textContent = hasLatLon ? formatValue(lastPositionEntry.lat) : '-';
       byId('otLon').textContent = hasLatLon ? formatValue(lastPositionEntry.lon) : '-';
       byId('otAccuracy').textContent = hasLatLon ? formatValue(lastPositionEntry.accuracy, 'm') : '-';
-      byId('otSpeed').textContent = hasLatLon ? formatValue(lastPositionEntry.speed, 'm/s') : '-';
+      byId('otSpeed').textContent = hasLatLon ? formatValue(lastPositionEntry.speed, 'km/h') : '-';
       byId('otHeading').textContent = hasLatLon ? formatValue(lastPositionEntry.heading, '°') : '-';
       byId('otBattery').textContent = formatValue(lastPositionEntry.battery, '%');
       byId('otTimestamp').textContent = formatTime(lastPositionEntry.timestamp);
@@ -1854,6 +2213,15 @@
       state.map.on('zoomstart', markUserInteraction);
       state.map.on('dragstart', markUserInteraction);
       state.map.on('rotate', markUserInteraction);
+      state.map.on('rotate rotateend rotatestart load viewreset', scheduleBearingMarkerSync);
+      scheduleBearingMarkerSync();
+
+      state.map.on('rotatestart', function () {
+        state.map.options.inertia = false;
+      });
+      state.map.on('rotateend', function () {
+        state.map.options.inertia = true;
+      });
       const mapContainerElement = state.map.getContainer();
       if (mapContainerElement) {
         const handleMapInteraction = function () {
@@ -1865,12 +2233,7 @@
         mapContainerElement.addEventListener('wheel', handleMapInteraction, { passive: true });
       }
 
-      state.map.on('click', function (clickEvent) {
-        handleMapClickRoute(clickEvent).catch(function (error) {
-          console.error('Fehler bei Karten-Zielauswahl:', error);
-          window.alert(getErrorMessageOrFallback(error, 'Route konnte nicht berechnet werden.'));
-        });
-      });
+      attachMapClickGestures(state.map);
 
       const triggerTilePrefetch = attachTilePrefetch(state.map);
       state.triggerTilePrefetch = triggerTilePrefetch;
@@ -2098,6 +2461,10 @@
         return Math.max(-ZOOM_MAX_VELOCITY, Math.min(ZOOM_MAX_VELOCITY, velocity));
       }
 
+      function isMapRotated() {
+        return typeof mapInstance.getBearing === 'function' && mapInstance.getBearing() !== 0;
+      }
+
       function runMomentum(anchorLatLng, velocity) {
         if (Math.abs(velocity) < ZOOM_MIN_VELOCITY) return;
         if (mapInstance._flyToFrame) mapInstance.stop();
@@ -2113,6 +2480,15 @@
           Math.min(mapInstance.getMaxZoom(), unclampedTargetZoom)
         );
         if (Math.abs(targetZoom - currentZoom) < ZOOM_TARGET_EPSILON) return;
+
+        if (isMapRotated()) {
+          if (typeof mapInstance.setZoomAround === 'function' && anchorLatLng) {
+            mapInstance.setZoomAround(anchorLatLng, targetZoom, { animate: true });
+          } else {
+            mapInstance.setZoom(targetZoom, { animate: true });
+          }
+          return;
+        }
 
         const zoomScale = mapInstance.getZoomScale(targetZoom, currentZoom);
         const anchorLayer = mapInstance.latLngToLayerPoint(anchorLatLng);
@@ -2172,16 +2548,6 @@
     function attachRotatedRendererSync(mapInstance, vectorRenderer) {
       if (!mapInstance || !vectorRenderer) return;
 
-      function mapHasNonZeroBearing() {
-        return typeof mapInstance.getBearing === 'function' && mapInstance.getBearing() !== 0;
-      }
-
-      function syncVectorRendererTransform() {
-        if (!vectorRenderer._map || typeof vectorRenderer._updateTransform !== 'function') return;
-        if (!mapHasNonZeroBearing()) return;
-        vectorRenderer._updateTransform(mapInstance.getCenter(), mapInstance.getZoom());
-      }
-
       function resetVectorRendererGeometry() {
         if (!vectorRenderer._map) return;
         if (typeof vectorRenderer._reset === 'function') {
@@ -2191,8 +2557,7 @@
         }
       }
 
-      mapInstance.on('move zoom', syncVectorRendererTransform);
-      mapInstance.on('rotate rotateend', resetVectorRendererGeometry);
+      mapInstance.on('rotateend', resetVectorRendererGeometry);
     }
 
     function byId(id) { return document.getElementById(id); }
@@ -2751,12 +3116,25 @@
       );
       for (let suggestionIndex = state.renderedRouteSuggestionCount; suggestionIndex < renderEndIndex; suggestionIndex += 1) {
         const suggestion = state.routeSuggestions[suggestionIndex];
-        if (!suggestion || !labelContainsQuery(suggestion.label, currentRouteQuery)) {
+        if (!suggestion) {
+          continue;
+        }
+        const isMyLocationEntry = suggestion.source === 'myLocation';
+        if (!isMyLocationEntry && !labelContainsQuery(suggestion.label, currentRouteQuery)) {
           continue;
         }
         const suggestionElement = document.createElement('div');
-        suggestionElement.className = 'suggestion-item' + (suggestion && suggestion.source === 'recent' ? ' is-recent' : '');
-        suggestionElement.innerHTML = buildHighlightedLabelHtml(suggestion.label, currentRouteQuery);
+        const cssClassParts = ['suggestion-item'];
+        if (suggestion.source === 'recent') {
+          cssClassParts.push('is-recent');
+        }
+        if (isMyLocationEntry) {
+          cssClassParts.push('is-my-location');
+        }
+        suggestionElement.className = cssClassParts.join(' ');
+        suggestionElement.innerHTML = isMyLocationEntry
+          ? '<span>Mein Standort</span>'
+          : buildHighlightedLabelHtml(suggestion.label, currentRouteQuery);
         suggestionElement.addEventListener('click', function (clickEvent) {
           stopEventPropagation(clickEvent);
           selectSuggestionAndShow(suggestion).catch(function (error) {
@@ -2813,6 +3191,10 @@
           state.map.removeLayer(state.destinationMarker);
           state.destinationMarker = null;
         }
+        if (state.startMarker) {
+          state.map.removeLayer(state.startMarker);
+          state.startMarker = null;
+        }
         if (Array.isArray(state.waypointMarkers)) {
           state.waypointMarkers.forEach(function (waypointMarkerEntry) {
             state.map.removeLayer(waypointMarkerEntry);
@@ -2826,6 +3208,12 @@
         state.pendingFocusWaypointRowId = null;
         state.selectedWaypointSuggestion = null;
         state.awaitingWaypointPick = false;
+        state.selectedRouteStart = null;
+        const routeStartQueryElement = byId('routeStartQuery');
+        if (routeStartQueryElement) {
+          routeStartQueryElement.value = '';
+        }
+        updateStartInlineClearButtonVisibility();
         setRouteInlineInfo('-', '-');
         updateWaypointButtonState();
         renderWaypointDynamicRows();
@@ -3248,13 +3636,34 @@
       });
     }
 
+    function buildMyLocationSuggestionEntry() {
+      return {
+        lat: NaN,
+        lon: NaN,
+        label: 'Mein Standort',
+        source: 'myLocation'
+      };
+    }
+
+    function prependMyLocationSuggestion(entries) {
+      const list = Array.isArray(entries) ? entries.slice() : [];
+      const myLocationEntry = buildMyLocationSuggestionEntry();
+      const filteredList = list.filter(function (entry) {
+        return !(entry && entry.source === 'myLocation');
+      });
+      return [myLocationEntry].concat(filteredList);
+    }
+
     function showRecentRouteSuggestionsForQuery(trimmedQuery) {
       const matchingRecents = getRecentSuggestionsMatchingQuery(trimmedQuery);
-      if (matchingRecents.length === 0) {
+      const includeMyLocation = !state.activeSearchTarget || state.activeSearchTarget.kind !== 'waypoint';
+      if (matchingRecents.length === 0 && !includeMyLocation) {
         hideRouteSuggestions();
         return;
       }
-      state.routeSuggestions = matchingRecents;
+      state.routeSuggestions = includeMyLocation
+        ? prependMyLocationSuggestion(matchingRecents)
+        : matchingRecents;
       renderRouteSuggestions(true);
     }
 
@@ -3271,7 +3680,11 @@
 
       const queryCacheKey = trimmedQuery.toLowerCase();
       if (state.suggestionCacheByQuery[queryCacheKey]) {
-        state.routeSuggestions = state.suggestionCacheByQuery[queryCacheKey];
+        const cachedRanked = state.suggestionCacheByQuery[queryCacheKey];
+        const includeMyLocationCached = !returnDataOnly && (!state.activeSearchTarget || state.activeSearchTarget.kind !== 'waypoint');
+        state.routeSuggestions = includeMyLocationCached
+          ? prependMyLocationSuggestion(cachedRanked)
+          : cachedRanked;
         if (!returnDataOnly) {
           renderRouteSuggestions(true);
         }
@@ -3347,7 +3760,11 @@
 
       const allSuggestions = deduplicateSuggestions(aggregatedSuggestions);
       const rankedSuggestions = rankSuggestions(trimmedQuery, allSuggestions, currentPosition);
-      state.routeSuggestions = rankedSuggestions;
+      const includeMyLocation = !returnDataOnly && (!state.activeSearchTarget || state.activeSearchTarget.kind !== 'waypoint');
+      const finalSuggestions = includeMyLocation
+        ? prependMyLocationSuggestion(rankedSuggestions)
+        : rankedSuggestions;
+      state.routeSuggestions = finalSuggestions;
       state.suggestionCacheByQuery[queryCacheKey] = rankedSuggestions;
       if (!returnDataOnly) {
         renderRouteSuggestions(true);
@@ -3443,12 +3860,68 @@
     }
 
     async function applyRouteFromCurrentServerPositionToDestinationIfAvailable(destination) {
-      const currentPosition = await fetchCurrentPosition();
-      if (!currentPosition) {
+      const startPosition = await resolveRouteStartPosition();
+      if (!startPosition) {
         return false;
       }
-      await applyRouteWithKnownStartPosition(currentPosition, destination);
+      await applyRouteWithKnownStartPosition(startPosition, destination);
       return true;
+    }
+
+    async function resolveRouteStartPosition() {
+      if (state.selectedRouteStart &&
+        typeof state.selectedRouteStart.lat === 'number' &&
+        typeof state.selectedRouteStart.lon === 'number' &&
+        Number.isFinite(state.selectedRouteStart.lat) &&
+        Number.isFinite(state.selectedRouteStart.lon)) {
+        return {
+          lat: state.selectedRouteStart.lat,
+          lon: state.selectedRouteStart.lon,
+          label: state.selectedRouteStart.label || 'Start',
+          kind: state.selectedRouteStart.kind || 'place'
+        };
+      }
+      const currentPosition = await fetchCurrentPosition();
+      if (!currentPosition) {
+        return null;
+      }
+      return {
+        lat: currentPosition.lat,
+        lon: currentPosition.lon,
+        label: 'Mein Standort',
+        kind: 'currentLocation'
+      };
+    }
+
+    function renderRouteStartMarker() {
+      if (!state.map) {
+        return;
+      }
+      const startEntry = state.selectedRouteStart;
+      if (!startEntry || typeof startEntry.lat !== 'number' || typeof startEntry.lon !== 'number') {
+        if (state.startMarker) {
+          state.map.removeLayer(state.startMarker);
+          state.startMarker = null;
+        }
+        return;
+      }
+      if (state.startMarker) {
+        state.map.removeLayer(state.startMarker);
+      }
+      state.startMarker = L.marker([startEntry.lat, startEntry.lon], {
+        icon: createRouteLabelIcon('S', 'route-label-marker-a')
+      }).addTo(state.map);
+      state.startMarker.bindPopup('S (Start): ' + (startEntry.label || ''));
+    }
+
+    function updateStartInlineClearButtonVisibility() {
+      const clearStartInlineButton = byId('clearStartInlineBtn');
+      const routeStartQueryElement = byId('routeStartQuery');
+      if (!clearStartInlineButton || !routeStartQueryElement) {
+        return;
+      }
+      const hasInputText = String(routeStartQueryElement.value || '').trim().length > 0;
+      clearStartInlineButton.classList.toggle('visible', hasInputText);
     }
 
     function formatDistanceMeters(distanceMeters) {
@@ -3484,6 +3957,81 @@
       });
     }
 
+    function getCurrentMapBearingDegrees() {
+      if (!state.map || typeof state.map.getBearing !== 'function') {
+        return 0;
+      }
+      const rawBearing = state.map.getBearing();
+      if (typeof rawBearing !== 'number' || !Number.isFinite(rawBearing)) {
+        return 0;
+      }
+      return rawBearing;
+    }
+
+    function isMapLockedFacingPositionMarker(targetMarker) {
+      if (!targetMarker || !targetMarker.options || !targetMarker.options.icon) {
+        return false;
+      }
+      const iconOptions = targetMarker.options.icon.options;
+      const iconClassName = iconOptions && iconOptions.className;
+      return iconClassName === 'device-facing-marker-layer';
+    }
+
+    function applyCounterRotationToSingleMarker(targetMarker, counterRotationRadians) {
+      if (!targetMarker || typeof targetMarker !== 'object') {
+        return;
+      }
+      if (!targetMarker.options) {
+        return;
+      }
+      if (isMapLockedFacingPositionMarker(targetMarker)) {
+        targetMarker.options.rotateWithView = true;
+        targetMarker.options.rotation = 0;
+        if (typeof targetMarker.update === 'function' && targetMarker._map) {
+          targetMarker.update();
+        }
+        return;
+      }
+      targetMarker.options.rotation = counterRotationRadians;
+      if (typeof targetMarker.update === 'function' && targetMarker._map) {
+        targetMarker.update();
+      }
+    }
+
+    function applyCounterRotationToAllPositionMarkers(counterRotationRadians) {
+      if (state.currentMarker) {
+        applyCounterRotationToSingleMarker(state.currentMarker, counterRotationRadians);
+      }
+      if (state.currentHeadingMarker) {
+        applyCounterRotationToSingleMarker(state.currentHeadingMarker, counterRotationRadians);
+      }
+      if (state.allDeviceMarkersByKey && typeof state.allDeviceMarkersByKey === 'object') {
+        Object.keys(state.allDeviceMarkersByKey).forEach(function (deviceKey) {
+          applyCounterRotationToSingleMarker(state.allDeviceMarkersByKey[deviceKey], counterRotationRadians);
+        });
+      }
+    }
+
+    let pendingBearingSyncFrameId = 0;
+    function scheduleBearingMarkerSync() {
+      if (pendingBearingSyncFrameId) {
+        return;
+      }
+      pendingBearingSyncFrameId = (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function')
+        ? window.requestAnimationFrame(performBearingSyncNow)
+        : setTimeout(performBearingSyncNow, 0);
+    }
+
+    function performBearingSyncNow() {
+      pendingBearingSyncFrameId = 0;
+      if (!state.map || typeof state.map.getBearing !== 'function') {
+        return;
+      }
+      const bearingDegrees = getCurrentMapBearingDegrees();
+      const counterRotationRadians = -bearingDegrees * Math.PI / 180;
+      applyCounterRotationToAllPositionMarkers(counterRotationRadians);
+    }
+
     function buildFacingIconSvg(normalizedHeading, accentHex) {
       const arrow = normalizedHeading === null ? '' : (
         '<g transform="rotate(' + normalizedHeading + ' 24 24)">' +
@@ -3516,6 +4064,7 @@
         icon: createRouteLabelIcon('A', 'route-label-marker-a')
       }).addTo(state.map);
       state.destinationMarker.bindPopup('A (Ziel): ' + destination.label);
+      renderRouteStartMarker();
       state.map.setView([destination.lat, destination.lon], 16);
       updateRouteActionVisibility();
     }
@@ -3693,12 +4242,14 @@
           state.activeWaypointRowId = rowEntry.id;
           state.waypointSuggestionTargetRowId = rowEntry.id;
           state.awaitingWaypointPick = true;
+          state.activeSearchTarget = { kind: 'waypoint', rowId: rowEntry.id };
           updateWaypointButtonState();
         });
         waypointInputElement.addEventListener('click', function () {
           state.activeWaypointRowId = rowEntry.id;
           state.waypointSuggestionTargetRowId = rowEntry.id;
           state.awaitingWaypointPick = true;
+          state.activeSearchTarget = { kind: 'waypoint', rowId: rowEntry.id };
           updateWaypointButtonState();
         });
         waypointInputElement.addEventListener('input', function () {
@@ -3934,7 +4485,67 @@
     }
 
     async function selectSuggestionAndShow(suggestion) {
+      if (!suggestion) {
+        return;
+      }
+      const targetKind = state.activeSearchTarget && state.activeSearchTarget.kind
+        ? state.activeSearchTarget.kind
+        : 'destination';
+      const isMyLocationSuggestion = suggestion.source === 'myLocation';
+
+      if (targetKind === 'start') {
+        const routeStartQueryElement = byId('routeStartQuery');
+        if (isMyLocationSuggestion) {
+          state.selectedRouteStart = null;
+          if (state.startMarker) {
+            state.map.removeLayer(state.startMarker);
+            state.startMarker = null;
+          }
+          if (routeStartQueryElement) {
+            routeStartQueryElement.value = 'Mein Standort';
+          }
+        } else {
+          state.selectedRouteStart = {
+            lat: suggestion.lat,
+            lon: suggestion.lon,
+            label: suggestion.label,
+            kind: 'place'
+          };
+          if (routeStartQueryElement) {
+            routeStartQueryElement.value = suggestion.label;
+          }
+          addToRecentRouteSuggestions(suggestion);
+          renderRouteStartMarker();
+        }
+        updateStartInlineClearButtonVisibility();
+        hideRouteSuggestions();
+        if (state.selectedRouteSuggestion) {
+          await applyRouteFromCurrentServerPositionToDestinationIfAvailable(state.selectedRouteSuggestion);
+        }
+        return;
+      }
+
       const routeQueryElement = byId('routeQuery');
+      if (isMyLocationSuggestion) {
+        const currentPosition = await fetchCurrentPosition();
+        if (!currentPosition) {
+          window.alert('Aktueller Standort ist noch nicht verfügbar.');
+          return;
+        }
+        const myLocationDestination = {
+          lat: currentPosition.lat,
+          lon: currentPosition.lon,
+          label: 'Mein Standort'
+        };
+        if (routeQueryElement) {
+          routeQueryElement.value = myLocationDestination.label;
+        }
+        state.selectedRouteSuggestion = myLocationDestination;
+        hideRouteSuggestions();
+        displayDestination(myLocationDestination);
+        return;
+      }
+
       if (routeQueryElement) {
         routeQueryElement.value = suggestion.label;
       }
@@ -3959,12 +4570,18 @@
       if (routeQueryElement) {
         routeQueryElement.value = '';
       }
+      const routeStartQueryElement = byId('routeStartQuery');
+      if (routeStartQueryElement) {
+        routeStartQueryElement.value = '';
+      }
       state.selectedRouteSuggestion = null;
       state.selectedWaypointSuggestion = null;
+      state.selectedRouteStart = null;
       hideRouteSuggestions();
       hideWaypointSuggestions();
       clearRouteVisualization();
       updateInlineClearButtonVisibility();
+      updateStartInlineClearButtonVisibility();
     }
 
 
@@ -4698,15 +5315,21 @@
           setTextIfPresent('lon', activePosition.lon);
 
           const currentLatLng = [activePosition.lat, activePosition.lon];
+          const headingDeviceKey = selectedDeviceKey || activeDeviceKey || '';
+          const nhLive = normalizeHeadingDegrees(activePosition && activePosition.heading);
+          rememberHeadingForDeviceKey(headingDeviceKey, nhLive);
+          const effLive = effectiveHeadingForDeviceDisplay(headingDeviceKey, nhLive);
 
           if (!state.showAllDevicesOnMap) {
             if (!state.currentMarker) {
               state.currentMarker = L.marker(currentLatLng, {
                 icon: createCurrentPositionIcon(
                   selectedDeviceKey || '',
-                  normalizeHeadingDegrees(activePosition && activePosition.heading)
+                  effLive
                 ),
-                zIndexOffset: 2000
+                zIndexOffset: 2000,
+                rotateWithView: true,
+                rotation: 0
               }).addTo(state.map);
               state.currentMarker.bindPopup('Aktuelle Position');
             } else {
@@ -4743,15 +5366,19 @@
             : null;
           if (fallbackLatLng && Array.isArray(fallbackLatLng) && fallbackLatLng.length >= 2) {
             if (!state.showAllDevicesOnMap) {
+              const dkFb = selectedDeviceKey || '';
+              const effFb = effectiveHeadingForDeviceDisplay(dkFb, null);
               if (!state.currentMarker) {
                 state.currentMarker = L.marker(fallbackLatLng, {
-                  icon: createCurrentPositionIcon(selectedDeviceKey || '', null),
-                  zIndexOffset: 2000
+                  icon: createCurrentPositionIcon(selectedDeviceKey || '', effFb),
+                  zIndexOffset: 2000,
+                  rotateWithView: true,
+                  rotation: 0
                 }).addTo(state.map);
                 state.currentMarker.bindPopup('Letzte bekannte Position');
               } else {
                 state.currentMarker.setLatLng(fallbackLatLng);
-                state.currentMarker.setIcon(createCurrentPositionIcon(selectedDeviceKey || '', null));
+                state.currentMarker.setIcon(createCurrentPositionIcon(selectedDeviceKey || '', effFb));
               }
             }
             state.lastKnownCurrentLatLng = [fallbackLatLng[0], fallbackLatLng[1]];
@@ -4884,9 +5511,9 @@
     }
 
     async function handleRouteRequest() {
-      const currentPosition = await fetchCurrentPosition();
-      if (!currentPosition) {
-        throw new Error('Aktuelle Position ist noch nicht verfügbar.');
+      const startPosition = await resolveRouteStartPosition();
+      if (!startPosition) {
+        throw new Error('Startposition konnte nicht ermittelt werden. Bitte Standort wählen oder OwnTracks-Position abwarten.');
       }
       const routeQueryElement = byId('routeQuery');
       const routeQuery = routeQueryElement ? routeQueryElement.value : '';
@@ -4895,26 +5522,39 @@
         : await searchDestinationCoordinates(routeQuery);
       state.selectedRouteSuggestion = destination;
       updateWaypointButtonState();
-      await applyRouteWithKnownStartPosition(currentPosition, destination);
+      await applyRouteWithKnownStartPosition(startPosition, destination);
       hideRouteSuggestions();
     }
 
-    async function handleMapClickRoute(clickEvent) {
+    function isSearchPanelOpen() {
+      const searchPanelElement = byId('searchPanel');
+      return !!(searchPanelElement && searchPanelElement.classList.contains('open'));
+    }
+
+    function hasActiveSearchTarget() {
+      return !!(state.activeSearchTarget && state.activeSearchTarget.kind);
+    }
+
+    async function applyClickedPlaceToActiveSearchField(clickEvent) {
       if (!clickEvent || !clickEvent.latlng) {
         return;
       }
       const clickLatitude = Number(clickEvent.latlng.lat);
       const clickLongitude = Number(clickEvent.latlng.lng);
+      if (!Number.isFinite(clickLatitude) || !Number.isFinite(clickLongitude)) {
+        return;
+      }
       const clickLabel = await resolveMapClickLabel(clickLatitude, clickLongitude);
-      const shouldHandleAsWaypoint = !!state.selectedRouteSuggestion &&
-        state.awaitingWaypointPick &&
-        Array.isArray(state.waypointEditorRows) &&
-        state.waypointEditorRows.length > 0;
-      if (shouldHandleAsWaypoint) {
-        let targetRowIndex = findWaypointRowIndexById(state.activeWaypointRowId);
+      const targetKind = state.activeSearchTarget && state.activeSearchTarget.kind;
+
+      if (targetKind === 'waypoint') {
+        const targetRowId = state.activeSearchTarget.rowId || state.activeWaypointRowId;
+        let targetRowIndex = findWaypointRowIndexById(targetRowId);
         if (targetRowIndex < 0) {
+          if (!Array.isArray(state.waypointEditorRows) || state.waypointEditorRows.length === 0) {
+            return;
+          }
           targetRowIndex = state.waypointEditorRows.length - 1;
-          state.activeWaypointRowId = state.waypointEditorRows[targetRowIndex].id;
         }
         const rowEntry = state.waypointEditorRows[targetRowIndex];
         rowEntry.suggestion = {
@@ -4933,6 +5573,28 @@
         return;
       }
 
+      if (targetKind === 'start') {
+        const startEntry = {
+          lat: clickLatitude,
+          lon: clickLongitude,
+          label: clickLabel,
+          kind: 'place'
+        };
+        state.selectedRouteStart = startEntry;
+        const routeStartQueryElement = byId('routeStartQuery');
+        if (routeStartQueryElement) {
+          routeStartQueryElement.value = clickLabel;
+        }
+        addToRecentRouteSuggestions({ lat: clickLatitude, lon: clickLongitude, label: clickLabel });
+        hideRouteSuggestions();
+        renderRouteStartMarker();
+        updateStartInlineClearButtonVisibility();
+        if (state.selectedRouteSuggestion) {
+          await applyRouteWithKnownStartPosition(startEntry, state.selectedRouteSuggestion);
+        }
+        return;
+      }
+
       const destination = {
         lat: clickLatitude,
         lon: clickLongitude,
@@ -4943,13 +5605,7 @@
       const routeQueryElement = byId('routeQuery');
       if (routeQueryElement) {
         routeQueryElement.value = destination.label;
-        routeQueryElement.focus();
       }
-      const searchPanelElement = byId('searchPanel');
-      if (searchPanelElement) {
-        searchPanelElement.classList.add('open');
-      }
-      updateDialogLayout();
       updateInlineClearButtonVisibility();
       hideRouteSuggestions();
       if (state.routeLine) {
@@ -4961,6 +5617,740 @@
       displayDestination(destination);
       updateWaypointButtonState();
       updateRouteLetterBadgesVisibility();
+    }
+
+    function attachMapClickGestures(mapInstance) {
+      const containerElement = mapInstance.getContainer();
+      if (!containerElement) {
+        return;
+      }
+      let pressStartedAt = 0;
+      let pressStartLayerPoint = null;
+      let pressStartScreenPoint = null;
+      let pressTimerId = null;
+      let pressFiredAsLong = false;
+      let pressActivePointerId = null;
+
+      const cancelPendingTimer = function () {
+        if (pressTimerId) {
+          clearTimeout(pressTimerId);
+          pressTimerId = null;
+        }
+      };
+
+      const cleanupGestureState = function () {
+        cancelPendingTimer();
+        pressStartedAt = 0;
+        pressStartLayerPoint = null;
+        pressStartScreenPoint = null;
+        pressActivePointerId = null;
+      };
+
+      const isPointerOnMapInteractive = function (target) {
+        if (!target || target === containerElement) {
+          return true;
+        }
+        let cursor = target;
+        while (cursor && cursor !== containerElement) {
+          if (cursor.classList && (
+            cursor.classList.contains('leaflet-marker-icon') ||
+            cursor.classList.contains('leaflet-popup') ||
+            cursor.classList.contains('leaflet-control')
+          )) {
+            return false;
+          }
+          cursor = cursor.parentElement;
+        }
+        return true;
+      };
+
+      containerElement.addEventListener('pointerdown', function (pointerEvent) {
+        if (pointerEvent.pointerType === 'mouse' && pointerEvent.button !== 0) {
+          return;
+        }
+        if (!isPointerOnMapInteractive(pointerEvent.target)) {
+          return;
+        }
+        cleanupGestureState();
+        pressFiredAsLong = false;
+        pressActivePointerId = pointerEvent.pointerId;
+        pressStartedAt = Date.now();
+        pressStartScreenPoint = { x: pointerEvent.clientX, y: pointerEvent.clientY };
+        const containerPoint = mapInstance.mouseEventToContainerPoint(pointerEvent);
+        pressStartLayerPoint = containerPoint;
+        pressTimerId = setTimeout(function () {
+          pressTimerId = null;
+          if (pressActivePointerId !== pointerEvent.pointerId) {
+            return;
+          }
+          pressFiredAsLong = true;
+          state.placeSheetSuppressNextMapClick = true;
+          const latlng = mapInstance.containerPointToLatLng(containerPoint);
+          handleMapLongPress({ latlng: latlng }).catch(function (longPressError) {
+            console.error('Fehler beim Ortsdetail-Aufruf:', longPressError);
+          });
+        }, MAP_LONG_PRESS_DURATION_MS);
+      }, { passive: true });
+
+      containerElement.addEventListener('pointermove', function (pointerEvent) {
+        if (pressActivePointerId !== pointerEvent.pointerId || !pressStartScreenPoint) {
+          return;
+        }
+        const movementX = pointerEvent.clientX - pressStartScreenPoint.x;
+        const movementY = pointerEvent.clientY - pressStartScreenPoint.y;
+        const movementDistance = Math.sqrt(movementX * movementX + movementY * movementY);
+        if (movementDistance > MAP_LONG_PRESS_MAX_MOVEMENT_PIXELS) {
+          cleanupGestureState();
+        }
+      }, { passive: true });
+
+      const cancelPress = function (pointerEvent) {
+        if (pointerEvent && pressActivePointerId !== pointerEvent.pointerId) {
+          return;
+        }
+        cleanupGestureState();
+      };
+      containerElement.addEventListener('pointerup', cancelPress, { passive: true });
+      containerElement.addEventListener('pointercancel', cancelPress, { passive: true });
+      containerElement.addEventListener('pointerleave', cancelPress, { passive: true });
+
+      mapInstance.on('click', function (clickEvent) {
+        if (state.placeSheetSuppressNextMapClick || pressFiredAsLong) {
+          state.placeSheetSuppressNextMapClick = false;
+          pressFiredAsLong = false;
+          return;
+        }
+        if (!isSearchPanelOpen() || !hasActiveSearchTarget()) {
+          return;
+        }
+        applyClickedPlaceToActiveSearchField(clickEvent).catch(function (clickError) {
+          console.error('Fehler bei Karten-Tap-Übernahme:', clickError);
+          window.alert(getErrorMessageOrFallback(clickError, 'Karten-Auswahl konnte nicht übernommen werden.'));
+        });
+      });
+    }
+
+    async function handleMapLongPress(longPressEvent) {
+      if (!longPressEvent || !longPressEvent.latlng) {
+        return;
+      }
+      const pressLatitude = Number(longPressEvent.latlng.lat);
+      const pressLongitude = Number(longPressEvent.latlng.lng);
+      if (!Number.isFinite(pressLatitude) || !Number.isFinite(pressLongitude)) {
+        return;
+      }
+      placeLongPressMarker(pressLatitude, pressLongitude);
+      const pressLabelPreview = 'Kartenpunkt: ' + pressLatitude.toFixed(5) + ', ' + pressLongitude.toFixed(5);
+      openPlaceSheet({
+        lat: pressLatitude,
+        lon: pressLongitude,
+        label: pressLabelPreview,
+        loading: true
+      });
+      try {
+        const placeDetails = await fetchPlaceDetails(pressLatitude, pressLongitude);
+        const resolvedLabel = composePlaceLabelFromDetails(placeDetails) ||
+          (await resolveMapClickLabel(pressLatitude, pressLongitude));
+        const placePoint = {
+          lat: pressLatitude,
+          lon: pressLongitude,
+          label: resolvedLabel || pressLabelPreview,
+          details: placeDetails
+        };
+        state.placeSheetCurrentPoint = placePoint;
+        renderPlaceSheet(placePoint);
+      } catch (detailsError) {
+        console.error('Ortsdetails konnten nicht geladen werden:', detailsError);
+        const fallbackLabel = await resolveMapClickLabel(pressLatitude, pressLongitude);
+        const fallbackPoint = {
+          lat: pressLatitude,
+          lon: pressLongitude,
+          label: fallbackLabel || pressLabelPreview,
+          details: null,
+          detailsError: detailsError && detailsError.message ? detailsError.message : 'Details nicht verfügbar.'
+        };
+        state.placeSheetCurrentPoint = fallbackPoint;
+        renderPlaceSheet(fallbackPoint);
+      }
+    }
+
+    function placeLongPressMarker(latitude, longitude) {
+      if (!state.map) {
+        return;
+      }
+      if (state.longPressMarker) {
+        state.map.removeLayer(state.longPressMarker);
+        state.longPressMarker = null;
+      }
+      const longPressIcon = L.divIcon({
+        className: 'longpress-marker-icon',
+        html: '<div class="longpress-marker-pin" aria-hidden="true"></div>',
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      });
+      state.longPressMarker = L.marker([latitude, longitude], { icon: longPressIcon }).addTo(state.map);
+    }
+
+    function removeLongPressMarker() {
+      if (state.longPressMarker && state.map) {
+        state.map.removeLayer(state.longPressMarker);
+      }
+      state.longPressMarker = null;
+    }
+
+    function refreshPlaceSheetToggleButton() {
+      const toggleExpandButton = byId('placeSheetToggleExpandBtn');
+      const sheetElement = byId('placeBottomSheet');
+      if (!toggleExpandButton) {
+        return;
+      }
+      const sheetHidden = sheetElement ? sheetElement.getAttribute('aria-hidden') === 'true' : true;
+      if (sheetHidden) {
+        toggleExpandButton.classList.remove('place-sheet-toggle-open');
+        toggleExpandButton.setAttribute('aria-expanded', 'false');
+        toggleExpandButton.setAttribute('aria-label', 'Dialog ausklappen');
+        toggleExpandButton.title = 'Ausklappen';
+        return;
+      }
+      const isPeekOnly = state.placeSheetSnapState === 'collapsed';
+      toggleExpandButton.classList.toggle('place-sheet-toggle-open', !isPeekOnly);
+      toggleExpandButton.setAttribute('aria-expanded', isPeekOnly ? 'false' : 'true');
+      if (isPeekOnly) {
+        toggleExpandButton.setAttribute('aria-label', 'Dialog ausklappen');
+        toggleExpandButton.title = 'Ausklappen';
+      } else {
+        toggleExpandButton.setAttribute('aria-label', 'Dialog zuklappen');
+        toggleExpandButton.title = 'Zuklappen';
+      }
+    }
+
+    function setPlaceSheetSnapState(nextSnapState) {
+      const sheetElement = byId('placeBottomSheet');
+      if (!sheetElement) {
+        return;
+      }
+      const allowedStates = ['collapsed', 'half', 'expanded'];
+      const targetState = allowedStates.indexOf(nextSnapState) >= 0 ? nextSnapState : 'collapsed';
+      sheetElement.classList.remove('collapsed', 'half', 'expanded');
+      sheetElement.classList.add(targetState);
+      sheetElement.style.transform = '';
+      state.placeSheetSnapState = targetState;
+      refreshPlaceSheetToggleButton();
+    }
+
+    function openPlaceSheet(initialPoint) {
+      const sheetElement = byId('placeBottomSheet');
+      const titleElement = byId('placeSheetTitle');
+      const bodyElement = byId('placeSheetBody');
+      if (!sheetElement || !titleElement || !bodyElement) {
+        return;
+      }
+      sheetElement.setAttribute('aria-hidden', 'false');
+      setPlaceSheetSnapState('collapsed');
+      titleElement.textContent = initialPoint && initialPoint.label
+        ? initialPoint.label
+        : 'Ort';
+      bodyElement.innerHTML = initialPoint && initialPoint.loading
+        ? '<div class="place-sheet-loading">Lade Details…</div>'
+        : '';
+      state.placeSheetCurrentPoint = initialPoint && !initialPoint.loading
+        ? initialPoint
+        : { lat: initialPoint && initialPoint.lat, lon: initialPoint && initialPoint.lon, label: initialPoint && initialPoint.label, details: null };
+    }
+
+    function closePlaceSheet() {
+      const sheetElement = byId('placeBottomSheet');
+      if (sheetElement) {
+        sheetElement.setAttribute('aria-hidden', 'true');
+        sheetElement.classList.remove('collapsed', 'half', 'expanded');
+        sheetElement.style.transform = '';
+      }
+      state.placeSheetCurrentPoint = null;
+      state.placeSheetSnapState = 'collapsed';
+      refreshPlaceSheetToggleButton();
+      removeLongPressMarker();
+    }
+
+    function togglePlaceSheetFromHeaderChevron() {
+      if (!isPlaceSheetOpen()) {
+        return;
+      }
+      if (state.placeSheetSnapState === 'collapsed') {
+        setPlaceSheetSnapState('expanded');
+      } else {
+        setPlaceSheetSnapState('collapsed');
+      }
+    }
+
+    function isPlaceSheetOpen() {
+      const sheetElement = byId('placeBottomSheet');
+      return !!(sheetElement && sheetElement.getAttribute('aria-hidden') === 'false');
+    }
+
+    function attachPlaceSheetDragGestures() {
+      const sheetElement = byId('placeBottomSheet');
+      const handleElement = byId('placeSheetHandle');
+      if (!sheetElement || !handleElement) {
+        return;
+      }
+      let dragActivePointerId = null;
+      let dragStartClientY = 0;
+      let dragStartTransform = 0;
+      let dragCurrentDelta = 0;
+      let pendingFrameId = 0;
+
+      const sheetHeight = function () {
+        return sheetElement.offsetHeight || 1;
+      };
+
+      const startTransformForState = function (snapStateName) {
+        const heightPx = sheetHeight();
+        if (snapStateName === 'expanded') {
+          return 0;
+        }
+        if (snapStateName === 'half') {
+          return Math.round(window.innerHeight * 0.45);
+        }
+        return Math.max(heightPx - PLACE_SHEET_COLLAPSED_TOP_OFFSET_PX, 0);
+      };
+
+      const applyTransform = function (translateY) {
+        sheetElement.style.transform = 'translate3d(0, ' + translateY + 'px, 0)';
+      };
+
+      const scheduleApply = function (translateY) {
+        if (pendingFrameId) {
+          return;
+        }
+        pendingFrameId = window.requestAnimationFrame(function () {
+          pendingFrameId = 0;
+          applyTransform(translateY);
+        });
+      };
+
+      handleElement.addEventListener('pointerdown', function (pointerEvent) {
+        if (!isPlaceSheetOpen()) {
+          return;
+        }
+        if (pointerEvent.pointerType === 'mouse' && pointerEvent.button !== 0) {
+          return;
+        }
+        dragActivePointerId = pointerEvent.pointerId;
+        dragStartClientY = pointerEvent.clientY;
+        dragStartTransform = startTransformForState(state.placeSheetSnapState);
+        dragCurrentDelta = 0;
+        sheetElement.classList.add('dragging');
+        state.placeSheetDragging = true;
+        try {
+          handleElement.setPointerCapture(pointerEvent.pointerId);
+        } catch (capturePointerError) {
+          /* pointer capture optional */
+        }
+      });
+
+      handleElement.addEventListener('pointermove', function (pointerEvent) {
+        if (dragActivePointerId !== pointerEvent.pointerId) {
+          return;
+        }
+        const deltaY = pointerEvent.clientY - dragStartClientY;
+        const heightPx = sheetHeight();
+        const minTranslate = 0;
+        const maxTranslate = Math.max(heightPx - 60, 100);
+        const nextTranslate = Math.max(minTranslate, Math.min(maxTranslate, dragStartTransform + deltaY));
+        dragCurrentDelta = nextTranslate;
+        scheduleApply(nextTranslate);
+      });
+
+      const finishDrag = function (pointerEvent) {
+        if (dragActivePointerId !== pointerEvent.pointerId) {
+          return;
+        }
+        sheetElement.classList.remove('dragging');
+        state.placeSheetDragging = false;
+        const heightPx = sheetHeight();
+        const expandedThreshold = heightPx * 0.18;
+        const halfThreshold = heightPx * 0.55;
+        let snapTarget = 'collapsed';
+        if (dragCurrentDelta < expandedThreshold) {
+          snapTarget = 'expanded';
+        } else if (dragCurrentDelta < halfThreshold) {
+          snapTarget = 'half';
+        } else {
+          snapTarget = 'collapsed';
+        }
+        try {
+          handleElement.releasePointerCapture(pointerEvent.pointerId);
+        } catch (releasePointerError) {
+          /* not critical */
+        }
+        dragActivePointerId = null;
+        setPlaceSheetSnapState(snapTarget);
+      };
+
+      handleElement.addEventListener('pointerup', finishDrag);
+      handleElement.addEventListener('pointercancel', finishDrag);
+      handleElement.addEventListener('pointerleave', function (pointerEvent) {
+        if (dragActivePointerId === pointerEvent.pointerId && !state.placeSheetDragging) {
+          dragActivePointerId = null;
+        }
+      });
+      handleElement.addEventListener('click', function () {
+        if (!isPlaceSheetOpen()) {
+          return;
+        }
+        if (state.placeSheetSnapState === 'collapsed') {
+          setPlaceSheetSnapState('half');
+        } else if (state.placeSheetSnapState === 'half') {
+          setPlaceSheetSnapState('expanded');
+        } else {
+          setPlaceSheetSnapState('half');
+        }
+      });
+    }
+
+    async function fetchPlaceDetails(latitude, longitude) {
+      const reverseUrl = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2' +
+        '&lat=' + encodeURIComponent(String(latitude)) +
+        '&lon=' + encodeURIComponent(String(longitude)) +
+        '&zoom=18&addressdetails=1&extratags=1&namedetails=1';
+      const reverseResult = await fetchJson(reverseUrl, {
+        headers: { 'Accept': 'application/json' }
+      });
+      if (!reverseResult || typeof reverseResult !== 'object') {
+        return null;
+      }
+      return reverseResult;
+    }
+
+    function composePlaceLabelFromDetails(details) {
+      if (!details || typeof details !== 'object') {
+        return '';
+      }
+      const addressBlock = details.address || {};
+      const primaryName = details.name || addressBlock.shop || addressBlock.amenity ||
+        addressBlock.tourism || addressBlock.building || addressBlock.road || '';
+      const displayName = details.display_name || '';
+      if (primaryName && displayName) {
+        if (displayName.toLowerCase().indexOf(String(primaryName).toLowerCase()) >= 0) {
+          return displayName;
+        }
+        return String(primaryName) + ', ' + displayName;
+      }
+      return displayName || String(primaryName || '');
+    }
+
+    function buildPlaceSheetRowElement(label, valueHtml, iconCharacter) {
+      const rowElement = document.createElement('div');
+      rowElement.className = 'place-sheet-row';
+      const iconElement = document.createElement('div');
+      iconElement.className = 'place-sheet-row-icon';
+      iconElement.textContent = iconCharacter || '';
+      const contentElement = document.createElement('div');
+      contentElement.className = 'place-sheet-row-content';
+      const labelElement = document.createElement('div');
+      labelElement.className = 'place-sheet-row-label';
+      labelElement.textContent = label;
+      const valueElement = document.createElement('div');
+      valueElement.className = 'place-sheet-row-value';
+      valueElement.innerHTML = valueHtml;
+      contentElement.appendChild(labelElement);
+      contentElement.appendChild(valueElement);
+      rowElement.appendChild(iconElement);
+      rowElement.appendChild(contentElement);
+      return rowElement;
+    }
+
+    function escapeHtmlForPlaceSheet(rawValue) {
+      return String(rawValue == null ? '' : rawValue)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function isUrlLikeString(rawValue) {
+      if (typeof rawValue !== 'string') {
+        return false;
+      }
+      return /^https?:\/\//i.test(rawValue) || /^www\./i.test(rawValue);
+    }
+
+    function buildExternalUrlString(rawValue) {
+      if (typeof rawValue !== 'string') {
+        return '';
+      }
+      if (/^https?:\/\//i.test(rawValue)) {
+        return rawValue;
+      }
+      if (/^www\./i.test(rawValue)) {
+        return 'https://' + rawValue;
+      }
+      return '';
+    }
+
+    function renderPlaceSheet(placePoint) {
+      const bodyElement = byId('placeSheetBody');
+      const titleElement = byId('placeSheetTitle');
+      if (!bodyElement || !titleElement) {
+        return;
+      }
+      bodyElement.innerHTML = '';
+      const placeDetails = placePoint && placePoint.details ? placePoint.details : null;
+      const detailsError = placePoint && placePoint.detailsError ? placePoint.detailsError : null;
+      const safeLabel = placePoint && placePoint.label ? placePoint.label : 'Ort';
+      titleElement.textContent = safeLabel;
+
+      const addressDisplay = (placeDetails && placeDetails.display_name) || safeLabel;
+      bodyElement.appendChild(buildPlaceSheetRowElement(
+        'Adresse',
+        escapeHtmlForPlaceSheet(addressDisplay),
+        '\uD83D\uDCCD'
+      ));
+
+      const lat = Number(placePoint && placePoint.lat);
+      const lon = Number(placePoint && placePoint.lon);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          'Koordinaten',
+          escapeHtmlForPlaceSheet(lat.toFixed(6) + ', ' + lon.toFixed(6)),
+          '\uD83E\uDDED'
+        ));
+      }
+
+      const extratags = placeDetails && placeDetails.extratags && typeof placeDetails.extratags === 'object'
+        ? placeDetails.extratags
+        : {};
+
+      const phoneRaw = extratags['phone'] || extratags['contact:phone'] || extratags['contact:mobile'];
+      if (phoneRaw) {
+        const phoneSafe = escapeHtmlForPlaceSheet(phoneRaw);
+        const phoneHrefSafe = encodeURI(String(phoneRaw).replace(/\s+/g, ''));
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          'Telefon',
+          '<a href="tel:' + phoneHrefSafe + '">' + phoneSafe + '</a>',
+          '\u260E\uFE0F'
+        ));
+      }
+
+      const emailRaw = extratags['email'] || extratags['contact:email'];
+      if (emailRaw) {
+        const emailSafe = escapeHtmlForPlaceSheet(emailRaw);
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          'E-Mail',
+          '<a href="mailto:' + emailSafe + '">' + emailSafe + '</a>',
+          '\u2709\uFE0F'
+        ));
+      }
+
+      const websiteRaw = extratags['website'] || extratags['url'] || extratags['contact:website'];
+      const websiteHrefValue = buildExternalUrlString(websiteRaw);
+      if (websiteHrefValue) {
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          'Webseite',
+          '<a href="' + escapeHtmlForPlaceSheet(websiteHrefValue) + '" target="_blank" rel="noopener noreferrer">' +
+            escapeHtmlForPlaceSheet(websiteRaw) + '</a>',
+          '\uD83C\uDF10'
+        ));
+      }
+
+      const openingHoursRaw = extratags['opening_hours'];
+      if (openingHoursRaw) {
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          '\u00d6ffnungszeiten',
+          escapeHtmlForPlaceSheet(openingHoursRaw),
+          '\uD83D\uDD52'
+        ));
+      }
+
+      const descriptionRaw = extratags['description'] || extratags['note'];
+      if (descriptionRaw) {
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          'Beschreibung',
+          escapeHtmlForPlaceSheet(descriptionRaw),
+          '\uD83D\uDCDD'
+        ));
+      }
+
+      const wikipediaRaw = extratags['wikipedia'];
+      if (wikipediaRaw && typeof wikipediaRaw === 'string') {
+        const splitIndex = wikipediaRaw.indexOf(':');
+        const wikiLanguage = splitIndex > 0 ? wikipediaRaw.slice(0, splitIndex) : 'de';
+        const wikiTitle = splitIndex > 0 ? wikipediaRaw.slice(splitIndex + 1) : wikipediaRaw;
+        const wikipediaUrl = 'https://' + encodeURIComponent(wikiLanguage) + '.wikipedia.org/wiki/' + encodeURIComponent(wikiTitle.replace(/ /g, '_'));
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          'Wikipedia',
+          '<a href="' + escapeHtmlForPlaceSheet(wikipediaUrl) + '" target="_blank" rel="noopener noreferrer">' +
+            escapeHtmlForPlaceSheet(wikipediaRaw) + '</a>',
+          '\uD83D\uDCD6'
+        ));
+      }
+
+      const poiCategory = placeDetails && (placeDetails.category || placeDetails.class);
+      const poiType = placeDetails && placeDetails.type;
+      const poiAddressType = placeDetails && placeDetails.addresstype;
+      const poiPartsList = [];
+      if (poiCategory) poiPartsList.push(String(poiCategory));
+      if (poiType) poiPartsList.push(String(poiType));
+      if (poiAddressType && poiAddressType !== poiType) poiPartsList.push(String(poiAddressType));
+      if (poiPartsList.length > 0) {
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          'POI-Typ',
+          escapeHtmlForPlaceSheet(poiPartsList.join(' / ')),
+          '\uD83C\uDFF7\uFE0F'
+        ));
+      }
+
+      const namedetails = placeDetails && placeDetails.namedetails && typeof placeDetails.namedetails === 'object'
+        ? placeDetails.namedetails
+        : {};
+      const consumedExtraTagKeys = {
+        phone: true,
+        'contact:phone': true,
+        'contact:mobile': true,
+        email: true,
+        'contact:email': true,
+        website: true,
+        url: true,
+        'contact:website': true,
+        opening_hours: true,
+        description: true,
+        note: true,
+        wikipedia: true
+      };
+      const remainingExtraTagPairs = [];
+      Object.keys(extratags).forEach(function (extraKey) {
+        if (consumedExtraTagKeys[extraKey]) {
+          return;
+        }
+        const extraValue = extratags[extraKey];
+        if (extraValue == null || extraValue === '') {
+          return;
+        }
+        remainingExtraTagPairs.push({ key: extraKey, value: extraValue });
+      });
+      Object.keys(namedetails).forEach(function (nameKey) {
+        const nameValue = namedetails[nameKey];
+        if (nameValue == null || nameValue === '') {
+          return;
+        }
+        remainingExtraTagPairs.push({ key: 'name:' + nameKey, value: nameValue });
+      });
+
+      if (remainingExtraTagPairs.length > 0) {
+        const extrasToggleButton = document.createElement('button');
+        extrasToggleButton.type = 'button';
+        extrasToggleButton.className = 'place-sheet-extras-toggle';
+        extrasToggleButton.textContent = 'Mehr Details (' + remainingExtraTagPairs.length + ')';
+        const extrasListElement = document.createElement('div');
+        extrasListElement.className = 'place-sheet-extras-list';
+        remainingExtraTagPairs.forEach(function (pairEntry) {
+          const pairRowElement = document.createElement('div');
+          pairRowElement.className = 'extras-row';
+          const pairKeyElement = document.createElement('div');
+          pairKeyElement.className = 'extras-key';
+          pairKeyElement.textContent = pairEntry.key;
+          const pairValueElement = document.createElement('div');
+          pairValueElement.className = 'extras-value';
+          if (isUrlLikeString(pairEntry.value)) {
+            const externalUrl = buildExternalUrlString(pairEntry.value);
+            if (externalUrl) {
+              const linkElement = document.createElement('a');
+              linkElement.href = externalUrl;
+              linkElement.target = '_blank';
+              linkElement.rel = 'noopener noreferrer';
+              linkElement.textContent = String(pairEntry.value);
+              pairValueElement.appendChild(linkElement);
+            } else {
+              pairValueElement.textContent = String(pairEntry.value);
+            }
+          } else {
+            pairValueElement.textContent = String(pairEntry.value);
+          }
+          pairRowElement.appendChild(pairKeyElement);
+          pairRowElement.appendChild(pairValueElement);
+          extrasListElement.appendChild(pairRowElement);
+        });
+        extrasToggleButton.addEventListener('click', function () {
+          extrasListElement.classList.toggle('open');
+        });
+        bodyElement.appendChild(extrasToggleButton);
+        bodyElement.appendChild(extrasListElement);
+      }
+
+      if (detailsError) {
+        const errorRow = document.createElement('div');
+        errorRow.className = 'place-sheet-loading';
+        errorRow.textContent = 'Hinweis: ' + detailsError;
+        bodyElement.appendChild(errorRow);
+      }
+    }
+
+    async function savePlaceSheetPointAsPlace() {
+      const point = state.placeSheetCurrentPoint;
+      if (!point || typeof point.lat !== 'number' || typeof point.lon !== 'number') {
+        window.alert('Kein Ort ausgewählt.');
+        return;
+      }
+      const suggestedName = (point.label && point.label.split(',')[0]) || 'Ort';
+      const placeName = window.prompt('Bitte Namen für den Ort eingeben:', suggestedName);
+      if (placeName === null) {
+        return;
+      }
+      const trimmedPlaceName = placeName.trim();
+      if (!trimmedPlaceName) {
+        window.alert('Bitte einen gültigen Namen eingeben.');
+        return;
+      }
+      const selectedDeviceKey = getSelectedDeviceKey();
+      const saveResult = await fetchJson('/api/places', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: trimmedPlaceName,
+          deviceKey: selectedDeviceKey,
+          lat: point.lat,
+          lon: point.lon
+        })
+      });
+      window.alert('Der Ort wurde gespeichert.');
+      await loadSavedPlaces();
+      if (saveResult && saveResult.data && saveResult.data.id) {
+        setSavedPlaceVisibility(saveResult.data.id, true);
+        renderPlacesList();
+      }
+    }
+
+    async function routeToPlaceSheetPoint() {
+      const point = state.placeSheetCurrentPoint;
+      if (!point || typeof point.lat !== 'number' || typeof point.lon !== 'number') {
+        window.alert('Kein Ort ausgewählt.');
+        return;
+      }
+      const destination = {
+        lat: point.lat,
+        lon: point.lon,
+        label: point.label || 'Kartenpunkt'
+      };
+      state.selectedRouteSuggestion = destination;
+      addToRecentRouteSuggestions(destination);
+      const routeQueryElement = byId('routeQuery');
+      if (routeQueryElement) {
+        routeQueryElement.value = destination.label;
+      }
+      updateInlineClearButtonVisibility();
+      const searchPanelElement = byId('searchPanel');
+      if (searchPanelElement) {
+        searchPanelElement.classList.add('open');
+      }
+      updateDialogLayout();
+      displayDestination(destination);
+      const routeApplied = await applyRouteFromCurrentServerPositionToDestinationIfAvailable(destination);
+      if (!routeApplied) {
+        window.alert('Startposition konnte nicht ermittelt werden. Bitte Standort wählen oder OwnTracks-Position abwarten.');
+        return;
+      }
+      closePlaceSheet();
     }
 
     function toggleWaypointPickMode() {
@@ -5072,6 +6462,33 @@
       }
     }
 
+    function isRouteSpeedJumpOutlier(estimatedSpeedMps, recentRouteSpeedsMps) {
+      if (!Number.isFinite(estimatedSpeedMps) || estimatedSpeedMps < 0) return false;
+      if (estimatedSpeedMps > ROUTE_MAX_INSTANT_SPEED_MPS) return true;
+      if (!Array.isArray(recentRouteSpeedsMps) || recentRouteSpeedsMps.length < 2) return false;
+      const sortedRecentSpeeds = recentRouteSpeedsMps.slice().sort(function (leftSpeed, rightSpeed) {
+        return leftSpeed - rightSpeed;
+      });
+      const middleIndex = Math.floor(sortedRecentSpeeds.length / 2);
+      const recentMedianMps = sortedRecentSpeeds.length % 2 === 1
+        ? sortedRecentSpeeds[middleIndex]
+        : (sortedRecentSpeeds[middleIndex - 1] + sortedRecentSpeeds[middleIndex]) / 2;
+      if (recentMedianMps < ROUTE_STATIONARY_SPEED_BASELINE_MPS) {
+        return estimatedSpeedMps > recentMedianMps + ROUTE_MAX_SPEED_JUMP_MPS;
+      }
+      const allowedSpeedMps = (ROUTE_STATIONARY_HIGH_SPEED_FACTOR * recentMedianMps) + ROUTE_MAX_SPEED_JUMP_MPS;
+      return estimatedSpeedMps > allowedSpeedMps;
+    }
+
+    function pushRecentRouteSpeedSample(recentRouteSpeedsMps, sampleSpeedMps) {
+      if (!Number.isFinite(sampleSpeedMps) || sampleSpeedMps < 0) return recentRouteSpeedsMps;
+      recentRouteSpeedsMps.push(sampleSpeedMps);
+      if (recentRouteSpeedsMps.length > ROUTE_RECENT_SPEED_WINDOW_SIZE) {
+        recentRouteSpeedsMps.splice(0, recentRouteSpeedsMps.length - ROUTE_RECENT_SPEED_WINDOW_SIZE);
+      }
+      return recentRouteSpeedsMps;
+    }
+
     function buildCleanRouteCoordinates(pointEntries) {
       const validPointEntries = Array.isArray(pointEntries) ? pointEntries.filter(function (pointEntry) {
         return pointEntry && typeof pointEntry.lat === 'number' && typeof pointEntry.lon === 'number';
@@ -5085,6 +6502,7 @@
         return [];
       }
       const filteredPoints = [];
+      const recentRouteSpeedsMps = [];
       let previousPoint = null;
       validPointEntries.forEach(function (pointEntry) {
         if (!previousPoint) {
@@ -5105,11 +6523,11 @@
         }
         const timeGapSeconds = hasUsableTimestamps ? Math.max(0.001, (currentTimestamp - previousTimestamp) / 1000) : null;
         const movementSpeedMps = timeGapSeconds ? (distanceGapMeters / timeGapSeconds) : null;
-        const isLikelyOutlier = movementSpeedMps !== null &&
-          movementSpeedMps > ROUTE_MAX_REASONABLE_SPEED_MPS &&
-          distanceGapMeters > 40;
-        if (isLikelyOutlier) {
+        if (movementSpeedMps !== null && isRouteSpeedJumpOutlier(movementSpeedMps, recentRouteSpeedsMps)) {
           return;
+        }
+        if (movementSpeedMps !== null) {
+          pushRecentRouteSpeedSample(recentRouteSpeedsMps, movementSpeedMps);
         }
         filteredPoints.push(pointEntry);
         previousPoint = pointEntry;
@@ -5277,6 +6695,10 @@
         return;
       }
       searchPanelElement.classList.toggle('open');
+      if (!searchPanelElement.classList.contains('open')) {
+        state.activeSearchTarget = null;
+        hideRouteSuggestions();
+      }
       updateDialogLayout();
     }
 
@@ -5499,10 +6921,14 @@
     }
 
     function normalizeHeadingDegrees(rawHeadingValue) {
-      if (typeof rawHeadingValue !== 'number' || !Number.isFinite(rawHeadingValue)) {
+      if (rawHeadingValue === null || rawHeadingValue === undefined || rawHeadingValue === '') {
         return null;
       }
-      return ((rawHeadingValue % 360) + 360) % 360;
+      const numericHeading = typeof rawHeadingValue === 'number' ? rawHeadingValue : Number(rawHeadingValue);
+      if (!Number.isFinite(numericHeading)) {
+        return null;
+      }
+      return ((numericHeading % 360) + 360) % 360;
     }
 
     function removeCurrentPositionMarkers() {
@@ -5519,65 +6945,108 @@
         state.currentMarker = null;
       }
       state.latestHeadingDegrees = null;
+      state.lastHeadingDegreesByDeviceKey = {};
+      try {
+        localStorage.removeItem(LAST_HEADING_BY_DEVICE_STORAGE_KEY);
+      } catch (storageClearError) {
+        console.warn('Konnte gespeicherte Karten-Richtungen nicht löschen:', storageClearError);
+      }
       clearAllDeviceMarkers();
+    }
+
+    function persistLastHeadingsToStorage() {
+      try {
+        localStorage.setItem(
+          LAST_HEADING_BY_DEVICE_STORAGE_KEY,
+          JSON.stringify(state.lastHeadingDegreesByDeviceKey)
+        );
+      } catch (storageWriteError) {
+        console.warn('Konnte Karten-Richtungen nicht speichern:', storageWriteError);
+      }
+    }
+
+    function rememberHeadingForDeviceKey(deviceKey, normalizedHeading) {
+      if (!deviceKey || normalizedHeading === null) {
+        return;
+      }
+      state.lastHeadingDegreesByDeviceKey[deviceKey] = normalizedHeading;
+      persistLastHeadingsToStorage();
+    }
+
+    function effectiveHeadingForDeviceDisplay(deviceKey, normalizedHeading) {
+      if (normalizedHeading !== null) {
+        return normalizedHeading;
+      }
+      if (deviceKey && typeof state.lastHeadingDegreesByDeviceKey[deviceKey] === 'number') {
+        return state.lastHeadingDegreesByDeviceKey[deviceKey];
+      }
+      return null;
     }
 
     function updateHeadingVisualization(positionEntry, currentLatLng) {
       if (!state.map) {
         return;
       }
-      const dk = getSelectedDeviceKey() || '';
+      const dk = getSelectedDeviceKey() || (positionEntry && positionEntry.key) || '';
       const nh = normalizeHeadingDegrees(positionEntry && positionEntry.heading);
+      rememberHeadingForDeviceKey(dk, nh);
+      const eff = effectiveHeadingForDeviceDisplay(dk, nh);
       state.latestHeadingDegrees = nh;
 
-      if (nh === null) {
-        if (state.currentHeadingMarker) {
-          state.map.removeLayer(state.currentHeadingMarker);
-          state.currentHeadingMarker = null;
+      try {
+        if (eff === null) {
+          if (state.currentHeadingMarker) {
+            state.map.removeLayer(state.currentHeadingMarker);
+            state.currentHeadingMarker = null;
+          }
+          if (state.currentMarker) {
+            state.currentMarker.setIcon(createCurrentPositionIcon(dk, null));
+          }
+          if (state.showAllDevicesOnMap && dk && state.allDeviceMarkersByKey[dk] &&
+            typeof state.allDeviceMarkersByKey[dk].setIcon === 'function') {
+            state.allDeviceMarkersByKey[dk].setIcon(createCurrentPositionIcon(dk, null));
+          }
+          return;
         }
+
         if (state.currentMarker) {
-          state.currentMarker.setIcon(createCurrentPositionIcon(dk, null));
+          if (state.currentHeadingMarker) {
+            state.map.removeLayer(state.currentHeadingMarker);
+            state.currentHeadingMarker = null;
+          }
+          state.currentMarker.setIcon(createCurrentPositionIcon(dk, eff));
+          return;
         }
+
         if (state.showAllDevicesOnMap && dk && state.allDeviceMarkersByKey[dk] &&
           typeof state.allDeviceMarkersByKey[dk].setIcon === 'function') {
-          state.allDeviceMarkersByKey[dk].setIcon(createCurrentPositionIcon(dk, null));
+          if (state.currentHeadingMarker) {
+            state.map.removeLayer(state.currentHeadingMarker);
+            state.currentHeadingMarker = null;
+          }
+          state.allDeviceMarkersByKey[dk].setIcon(createCurrentPositionIcon(dk, eff));
+          if (currentLatLng) {
+            state.allDeviceMarkersByKey[dk].setLatLng(currentLatLng);
+          }
+          return;
         }
-        return;
-      }
 
-      if (state.currentMarker) {
-        if (state.currentHeadingMarker) {
-          state.map.removeLayer(state.currentHeadingMarker);
-          state.currentHeadingMarker = null;
+        const hi = createCurrentPositionIcon(dk, eff);
+        if (!state.currentHeadingMarker) {
+          state.currentHeadingMarker = L.marker(currentLatLng, {
+            icon: hi,
+            interactive: false,
+            keyboard: false,
+            zIndexOffset: 2500,
+            rotateWithView: true,
+            rotation: 0
+          }).addTo(state.map);
+        } else {
+          state.currentHeadingMarker.setLatLng(currentLatLng);
+          state.currentHeadingMarker.setIcon(hi);
         }
-        state.currentMarker.setIcon(createCurrentPositionIcon(dk, nh));
-        return;
-      }
-
-      if (state.showAllDevicesOnMap && dk && state.allDeviceMarkersByKey[dk] &&
-        typeof state.allDeviceMarkersByKey[dk].setIcon === 'function') {
-        if (state.currentHeadingMarker) {
-          state.map.removeLayer(state.currentHeadingMarker);
-          state.currentHeadingMarker = null;
-        }
-        state.allDeviceMarkersByKey[dk].setIcon(createCurrentPositionIcon(dk, nh));
-        if (currentLatLng) {
-          state.allDeviceMarkersByKey[dk].setLatLng(currentLatLng);
-        }
-        return;
-      }
-
-      const hi = createCurrentPositionIcon(dk, nh);
-      if (!state.currentHeadingMarker) {
-        state.currentHeadingMarker = L.marker(currentLatLng, {
-          icon: hi,
-          interactive: false,
-          keyboard: false,
-          zIndexOffset: 2500
-        }).addTo(state.map);
-      } else {
-        state.currentHeadingMarker.setLatLng(currentLatLng);
-        state.currentHeadingMarker.setIcon(hi);
+      } finally {
+        performBearingSyncNow();
       }
     }
 
@@ -5685,7 +7154,10 @@
       const locateToggleButton = byId('locateToggleBtn');
       const mapStyleToggleButton = byId('mapStyleToggleBtn');
       const clearSearchInlineButton = byId('clearSearchInlineBtn');
+      const clearStartInlineButton = byId('clearStartInlineBtn');
+      const useCurrentAsStartButton = byId('useCurrentAsStartBtn');
       const routeQueryElement = byId('routeQuery');
+      const routeStartQueryElement = byId('routeStartQuery');
       const waypointSuggestionsElement = byId('waypointSuggestions');
       const routeSuggestionsElement = byId('routeSuggestions');
       const deleteSelectedButton = byId('deleteSelectedBtn');
@@ -5695,6 +7167,10 @@
       const nextDeviceButton = byId('nextDeviceBtn');
       const toggleDeviceViewButton = byId('toggleDeviceViewBtn');
       const dropDeviceButton = byId('dropDeviceBtn');
+      const placeSheetCloseButton = byId('placeSheetCloseBtn');
+      const placeSheetToggleExpandButton = byId('placeSheetToggleExpandBtn');
+      const placeSheetRouteButton = byId('placeSheetRouteBtn');
+      const placeSheetMarkButton = byId('placeSheetMarkBtn');
 
       updateTrackingButtonLabel();
       updateTrackingRouteButtonLabel();
@@ -5747,6 +7223,7 @@
         const setDestinationTarget = function () {
           state.awaitingWaypointPick = false;
           state.activeWaypointRowId = null;
+          state.activeSearchTarget = { kind: 'destination' };
           updateWaypointButtonState();
           const currentInputValue = String(routeQueryElement.value || '').trim();
           if (currentInputValue.length === 0) {
@@ -5780,6 +7257,104 @@
           }, ROUTE_INPUT_DEBOUNCE_MS);
         });
       }
+      if (routeStartQueryElement) {
+        const setStartTarget = function () {
+          state.awaitingWaypointPick = false;
+          state.activeWaypointRowId = null;
+          state.activeSearchTarget = { kind: 'start' };
+          updateWaypointButtonState();
+          const currentStartValue = String(routeStartQueryElement.value || '').trim();
+          if (currentStartValue.length === 0) {
+            showRecentRouteSuggestionsForQuery(currentStartValue);
+          }
+        };
+        routeStartQueryElement.addEventListener('focus', setStartTarget);
+        routeStartQueryElement.addEventListener('click', setStartTarget);
+        routeStartQueryElement.addEventListener('keydown', function (keyboardEvent) {
+          if (keyboardEvent.key === 'Enter') {
+            keyboardEvent.preventDefault();
+            const startQueryText = String(routeStartQueryElement.value || '').trim();
+            if (!startQueryText) {
+              state.selectedRouteStart = null;
+              if (state.startMarker) {
+                state.map.removeLayer(state.startMarker);
+                state.startMarker = null;
+              }
+              return;
+            }
+            searchDestinationCoordinates(startQueryText).then(function (resolvedStart) {
+              state.selectedRouteStart = {
+                lat: resolvedStart.lat,
+                lon: resolvedStart.lon,
+                label: resolvedStart.label,
+                kind: 'place'
+              };
+              routeStartQueryElement.value = resolvedStart.label;
+              addToRecentRouteSuggestions(resolvedStart);
+              renderRouteStartMarker();
+              updateStartInlineClearButtonVisibility();
+              if (state.selectedRouteSuggestion) {
+                return applyRouteFromCurrentServerPositionToDestinationIfAvailable(state.selectedRouteSuggestion);
+              }
+              return null;
+            }).catch(function (error) {
+              handleAsyncActionError(error, 'Fehler bei der Start-Suche:', 'Startpunkt konnte nicht gefunden werden.');
+            });
+          }
+        });
+        routeStartQueryElement.addEventListener('input', function () {
+          if (String(routeStartQueryElement.value || '').trim() === '') {
+            state.selectedRouteStart = null;
+          }
+          updateStartInlineClearButtonVisibility();
+          if (state.routeSuggestTimer) {
+            clearTimeout(state.routeSuggestTimer);
+          }
+          state.routeSuggestTimer = setTimeout(function () {
+            fetchRouteSuggestions(routeStartQueryElement.value).catch(function (error) {
+              if (error && error.name === 'AbortError') {
+                return;
+              }
+              console.error('Fehler bei Start-Vorschlägen:', error);
+              hideRouteSuggestions();
+            });
+          }, ROUTE_INPUT_DEBOUNCE_MS);
+        });
+      }
+      bindClickIfPresent(clearStartInlineButton, function () {
+        if (routeStartQueryElement) {
+          routeStartQueryElement.value = '';
+        }
+        state.selectedRouteStart = null;
+        if (state.startMarker) {
+          state.map.removeLayer(state.startMarker);
+          state.startMarker = null;
+        }
+        updateStartInlineClearButtonVisibility();
+        hideRouteSuggestions();
+      });
+      bindClickIfPresent(useCurrentAsStartButton, function () {
+        state.selectedRouteStart = null;
+        if (state.startMarker) {
+          state.map.removeLayer(state.startMarker);
+          state.startMarker = null;
+        }
+        if (routeStartQueryElement) {
+          routeStartQueryElement.value = 'Mein Standort';
+        }
+        updateStartInlineClearButtonVisibility();
+        hideRouteSuggestions();
+        if (state.selectedRouteSuggestion) {
+          applyRouteFromCurrentServerPositionToDestinationIfAvailable(state.selectedRouteSuggestion).catch(function (error) {
+            handleAsyncActionError(error, 'Fehler bei Routenberechnung:', 'Route konnte nicht berechnet werden.');
+          });
+        }
+      });
+      bindClickIfPresent(placeSheetCloseButton, closePlaceSheet);
+      bindClickIfPresent(placeSheetToggleExpandButton, togglePlaceSheetFromHeaderChevron);
+      bindAsyncClickIfPresent(placeSheetRouteButton, routeToPlaceSheetPoint, 'Fehler beim Anzeigen der Route:', 'Route konnte nicht berechnet werden.');
+      bindAsyncClickIfPresent(placeSheetMarkButton, savePlaceSheetPointAsPlace, 'Fehler beim Speichern des Ortes:', 'Ort konnte nicht gespeichert werden.');
+      attachPlaceSheetDragGestures();
       if (waypointSuggestionsElement) {
         waypointSuggestionsElement.addEventListener('scroll', function () {
           if (state.waypointSuggestions.length > 0) {

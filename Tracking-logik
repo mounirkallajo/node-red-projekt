@@ -1,14 +1,19 @@
 const MAX_HISTORY = 2000;
-const MIN_POINT_DISTANCE_M = 8;
+const MIN_POINT_DISTANCE_M = 3;
 const MAX_ACCURACY_M = 15;
-const SIMPLIFY_TOLERANCE_M = 5;
-const SIMPLIFY_EVERY_N_POINTS = 25;
+const SIMPLIFY_TOLERANCE_M = 2;
+const SIMPLIFY_EVERY_N_POINTS = 60;
+const RECENT_UNSIMPLIFIED_POINTS = 80;
 const RECENT_POINT_WINDOW_MS = 5 * 60 * 1000;
 const MIN_TIME_BETWEEN_POINTS_MS = 1000;
-const MIN_MOVEMENT_SPEED_MPS = 0.3;
+const MIN_MOVEMENT_SPEED_KMH = 1.0;
 const ACCURACY_DISTANCE_MULTIPLIER = 1.2;
-const MAX_REASONABLE_SPEED_MPS = 18;
-const STATIONARY_SPEED_THRESHOLD_MPS = 0.5;
+const MAX_INSTANT_SPEED_MPS = 70;
+const MAX_SPEED_JUMP_MPS = 14;
+const STATIONARY_SPEED_BASELINE_MPS = 1.5;
+const STATIONARY_HIGH_SPEED_FACTOR = 2.0;
+const RECENT_SPEED_WINDOW_SIZE = 5;
+const STATIONARY_SPEED_THRESHOLD_KMH = 1.8;
 const STATIONARY_DRIFT_RADIUS_M = 12;
 const STATIONARY_MAX_ACCURACY_M = 20;
 
@@ -31,45 +36,87 @@ function distanceMeters(pointA, pointB) {
     return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
-function isValidCandidate(newPoint, previousPoint) {
-    if (!newPoint || typeof newPoint.lat !== "number" || typeof newPoint.lon !== "number") {
+function medianOfSortedNumbers(sortedValues) {
+    const sampleCount = sortedValues.length;
+    if (sampleCount === 0) return 0;
+    const middleIndex = Math.floor(sampleCount / 2);
+    if (sampleCount % 2 === 1) return sortedValues[middleIndex];
+    return (sortedValues[middleIndex - 1] + sortedValues[middleIndex]) / 2;
+}
+
+function computeRecentMedianSpeedMps(recentSpeedsMps) {
+    if (!Array.isArray(recentSpeedsMps) || recentSpeedsMps.length === 0) return 0;
+    const sortedSpeeds = recentSpeedsMps.slice().sort(function (a, b) { return a - b; });
+    return medianOfSortedNumbers(sortedSpeeds);
+}
+
+function isSpeedJumpOutlier(estimatedSpeedMps, recentSpeedsMps) {
+    if (!Number.isFinite(estimatedSpeedMps) || estimatedSpeedMps < 0) return false;
+    if (estimatedSpeedMps > MAX_INSTANT_SPEED_MPS) return true;
+    if (!Array.isArray(recentSpeedsMps) || recentSpeedsMps.length < 2) {
         return false;
+    }
+    const recentMedianMps = computeRecentMedianSpeedMps(recentSpeedsMps);
+    if (recentMedianMps < STATIONARY_SPEED_BASELINE_MPS) {
+        return estimatedSpeedMps > recentMedianMps + MAX_SPEED_JUMP_MPS;
+    }
+    const allowedSpeedMps = (STATIONARY_HIGH_SPEED_FACTOR * recentMedianMps) + MAX_SPEED_JUMP_MPS;
+    return estimatedSpeedMps > allowedSpeedMps;
+}
+
+function pushRecentSpeedSample(recentSpeedsMps, sampleSpeedMps) {
+    if (!Number.isFinite(sampleSpeedMps) || sampleSpeedMps < 0) return recentSpeedsMps || [];
+    const updatedSpeeds = Array.isArray(recentSpeedsMps) ? recentSpeedsMps.slice() : [];
+    updatedSpeeds.push(sampleSpeedMps);
+    if (updatedSpeeds.length > RECENT_SPEED_WINDOW_SIZE) {
+        return updatedSpeeds.slice(-RECENT_SPEED_WINDOW_SIZE);
+    }
+    return updatedSpeeds;
+}
+
+function evaluateCandidate(newPoint, previousPoint, recentSpeedsMps) {
+    if (!newPoint || typeof newPoint.lat !== "number" || typeof newPoint.lon !== "number") {
+        return { accept: false, estimatedSpeedMps: null };
     }
     if (typeof newPoint.accuracy === "number" && newPoint.accuracy > MAX_ACCURACY_M) {
-        return false;
+        return { accept: false, estimatedSpeedMps: null };
     }
-    if (!previousPoint) return true;
+    if (!previousPoint) return { accept: true, estimatedSpeedMps: null };
 
     const previousTimestamp = Number(previousPoint.timestamp) || 0;
     const currentTimestamp = Number(newPoint.timestamp) || Date.now();
     const timeSinceLastPoint = currentTimestamp - previousTimestamp;
 
     if (timeSinceLastPoint < MIN_TIME_BETWEEN_POINTS_MS) {
-        return false;
+        return { accept: false, estimatedSpeedMps: null };
     }
 
     const pointDistance = distanceMeters(previousPoint, newPoint);
     const elapsedSeconds = timeSinceLastPoint > 0 ? (timeSinceLastPoint / 1000) : 0;
+    let estimatedSpeedMps = null;
     if (elapsedSeconds > 0) {
-        const estimatedSpeedMetersPerSecond = pointDistance / elapsedSeconds;
-        if (estimatedSpeedMetersPerSecond > MAX_REASONABLE_SPEED_MPS) {
-            return false;
+        estimatedSpeedMps = pointDistance / elapsedSeconds;
+        if (isSpeedJumpOutlier(estimatedSpeedMps, recentSpeedsMps)) {
+            return { accept: false, estimatedSpeedMps: estimatedSpeedMps };
         }
     }
+
     const newAccuracy = typeof newPoint.accuracy === "number" ? newPoint.accuracy : 0;
     const previousAccuracy = typeof previousPoint.accuracy === "number" ? previousPoint.accuracy : 0;
     const noiseRadius = Math.max(newAccuracy, previousAccuracy) * ACCURACY_DISTANCE_MULTIPLIER;
     const effectiveMinDistance = Math.max(MIN_POINT_DISTANCE_M, noiseRadius);
 
     if (pointDistance < effectiveMinDistance) {
-        return timeSinceLastPoint > RECENT_POINT_WINDOW_MS;
+        const acceptDueToTimeWindow = timeSinceLastPoint > RECENT_POINT_WINDOW_MS;
+        return { accept: acceptDueToTimeWindow, estimatedSpeedMps: estimatedSpeedMps };
     }
 
-    if (typeof newPoint.speed === "number" && newPoint.speed >= 0 && newPoint.speed < MIN_MOVEMENT_SPEED_MPS) {
-        return timeSinceLastPoint > RECENT_POINT_WINDOW_MS;
+    if (typeof newPoint.speed === "number" && newPoint.speed >= 0 && newPoint.speed < MIN_MOVEMENT_SPEED_KMH) {
+        const acceptDueToTimeWindow = timeSinceLastPoint > RECENT_POINT_WINDOW_MS;
+        return { accept: acceptDueToTimeWindow, estimatedSpeedMps: estimatedSpeedMps };
     }
 
-    return true;
+    return { accept: true, estimatedSpeedMps: estimatedSpeedMps };
 }
 
 function perpendicularDistanceMeters(point, lineStart, lineEnd) {
@@ -126,19 +173,35 @@ function simplifyPath(points, toleranceMeters) {
     return simplifiedPoints;
 }
 
-function appendToHistory(history, position) {
+function simplifyPathPreserveTail(points, toleranceMeters, tailLength) {
+    if (!Array.isArray(points)) return [];
+    const safeTailLength = Math.max(0, tailLength | 0);
+    if (points.length <= safeTailLength + 2) {
+        return points.slice();
+    }
+    const headPoints = points.slice(0, points.length - safeTailLength);
+    const tailPoints = points.slice(points.length - safeTailLength);
+    const simplifiedHead = simplifyPath(headPoints, toleranceMeters);
+    return simplifiedHead.concat(tailPoints);
+}
+
+function appendToHistory(history, position, recentSpeedsMps) {
     const lastPoint = history.length > 0 ? history[history.length - 1] : null;
-    if (!isValidCandidate(position, lastPoint)) {
-        return { history: history, added: false };
+    const evaluation = evaluateCandidate(position, lastPoint, recentSpeedsMps);
+    if (!evaluation.accept) {
+        return { history: history, added: false, recentSpeedsMps: recentSpeedsMps || [] };
     }
     history.push(position);
     if (history.length % SIMPLIFY_EVERY_N_POINTS === 0) {
-        history = simplifyPath(history, SIMPLIFY_TOLERANCE_M);
+        history = simplifyPathPreserveTail(history, SIMPLIFY_TOLERANCE_M, RECENT_UNSIMPLIFIED_POINTS);
     }
     if (history.length > MAX_HISTORY) {
         history = history.slice(-MAX_HISTORY);
     }
-    return { history: history, added: true };
+    const updatedSpeeds = evaluation.estimatedSpeedMps !== null
+        ? pushRecentSpeedSample(recentSpeedsMps, evaluation.estimatedSpeedMps)
+        : (recentSpeedsMps || []);
+    return { history: history, added: true, recentSpeedsMps: updatedSpeeds };
 }
 
 function stabilizePositionForStationaryDevice(nextPosition, previousPosition) {
@@ -155,7 +218,7 @@ function stabilizePositionForStationaryDevice(nextPosition, previousPosition) {
     const speedValue = typeof nextPosition.speed === "number" && nextPosition.speed >= 0 ? nextPosition.speed : null;
     const accuracyValue = typeof nextPosition.accuracy === "number" && nextPosition.accuracy >= 0 ? nextPosition.accuracy : null;
     const isSlowOrStanding = speedValue !== null
-        ? speedValue <= STATIONARY_SPEED_THRESHOLD_MPS
+        ? speedValue <= STATIONARY_SPEED_THRESHOLD_KMH
         : pointDistance <= STATIONARY_DRIFT_RADIUS_M;
     const accuracyIsGoodEnough = accuracyValue === null || accuracyValue <= STATIONARY_MAX_ACCURACY_M;
     const driftRadius = Math.max(
@@ -172,6 +235,7 @@ function stabilizePositionForStationaryDevice(nextPosition, previousPosition) {
         user: nextPosition.user,
         device: nextPosition.device,
         key: nextPosition.key,
+        owntracksTid: nextPosition.owntracksTid || null,
         lat: previousPosition.lat,
         lon: previousPosition.lon,
         accuracy: nextPosition.accuracy,
@@ -180,6 +244,60 @@ function stabilizePositionForStationaryDevice(nextPosition, previousPosition) {
         battery: nextPosition.battery,
         timestamp: nextPosition.timestamp,
         receivedAt: nextPosition.receivedAt
+    };
+}
+
+function trackingStateHasMissionAnchor(ts) {
+    if (!ts || typeof ts !== "object") return false;
+    const m = ts.missionStartPosition;
+    return !!(m && typeof m.lat === "number" && typeof m.lon === "number" &&
+        Number.isFinite(m.lat) && Number.isFinite(m.lon));
+}
+
+function cloneTrackingStateForKeyMerge(ts) {
+    if (!ts || typeof ts !== "object") return null;
+    function pos(p) {
+        if (!p || typeof p !== "object") return null;
+        if (typeof p.lat !== "number" || typeof p.lon !== "number") return null;
+        if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return null;
+        return { lat: p.lat, lon: p.lon, timestamp: p.timestamp != null ? p.timestamp : null };
+    }
+    const m = pos(ts.missionStartPosition);
+    if (!m) return null;
+    const r = pos(ts.returnPosition);
+    const ret = r || { lat: m.lat, lon: m.lon, timestamp: m.timestamp };
+    return {
+        active: !!ts.active,
+        trackingSessionId: ts.trackingSessionId != null ? ts.trackingSessionId : null,
+        missionStartPosition: m,
+        returnPosition: ret
+    };
+}
+
+function coordinatesLookValidForBoat(p) {
+    if (!p || typeof p !== "object") return false;
+    if (p.lat === null || p.lon === null) return false;
+    if (typeof p.lat !== "number" || typeof p.lon !== "number") return false;
+    if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return false;
+    if (Math.abs(p.lat) < 1e-7 && Math.abs(p.lon) < 1e-7) return false;
+    if (Math.abs(p.lat) > 90 || Math.abs(p.lon) > 180) return false;
+    return true;
+}
+
+function snapshotLastGoodForDevice(p, deviceKey) {
+    return {
+        user: p.user,
+        device: p.device,
+        key: deviceKey,
+        owntracksTid: p.owntracksTid || null,
+        lat: p.lat,
+        lon: p.lon,
+        accuracy: p.accuracy,
+        speed: p.speed,
+        heading: p.heading,
+        battery: p.battery,
+        timestamp: p.timestamp,
+        receivedAt: p.receivedAt
     };
 }
 
@@ -267,11 +385,15 @@ if (!hasCoordinateNumbers) {
 if (!deviceId) deviceId = "unknown";
 if (!username) username = "unknown";
 
-const key = `${username}/${deviceId}`;
+const owntracksTid = isOwntracks && typeof p.tid === "string" && p.tid.trim()
+    ? p.tid.trim().toLowerCase()
+    : "";
+let key = `${username}/${deviceId}`;
 const position = {
     user: username,
     device: deviceId,
     key: key,
+    owntracksTid: owntracksTid || null,
     lat: lat,
     lon: lon,
     accuracy: accuracy !== null && !isNaN(accuracy) ? accuracy : null,
@@ -282,49 +404,136 @@ const position = {
     receivedAt: receivedAt
 };
 
-const previousLastPosition = global.get("lastPosition") || null;
-const stabilizedPosition = stabilizePositionForStationaryDevice(position, previousLastPosition);
-global.set("lastPosition", stabilizedPosition);
+let devices = global.get("devices") || {};
+const previousDevicePosition = devices[key] && typeof devices[key] === "object" ? devices[key] : null;
+const stabilizedPosition = stabilizePositionForStationaryDevice(position, previousDevicePosition);
 
 let history = global.get("history") || [];
 let historyByDevice = global.get("historyByDevice") || {};
 let receivedCount = global.get("receivedCount") || 0;
 let receivedCountByDevice = global.get("receivedCountByDevice") || {};
-const trackingIsActive = !!global.get("trackingActive");
+let trackingStateByDevice = global.get("trackingStateByDevice") || {};
+let savedPlacesByDevice = global.get("savedPlacesByDevice") || {};
+let savedRoutesByDevice = global.get("savedRoutesByDevice") || {};
 
-if (!global.get("historyCleaned")) {
-    history = simplifyPath(history, SIMPLIFY_TOLERANCE_M);
+if (owntracksTid) {
+    const incomingKey = key;
+    let matchedKey = "";
+    Object.keys(devices).some(function (existingKey) {
+        const existingDevice = devices[existingKey];
+        if (!existingDevice || typeof existingDevice.owntracksTid !== "string") {
+            return false;
+        }
+        if (String(existingDevice.owntracksTid).toLowerCase() === owntracksTid) {
+            matchedKey = existingKey;
+            return true;
+        }
+        return false;
+    });
+
+    if (matchedKey && matchedKey !== incomingKey) {
+        const oldHistory = Array.isArray(historyByDevice[matchedKey]) ? historyByDevice[matchedKey] : [];
+        const newHistory = Array.isArray(historyByDevice[incomingKey]) ? historyByDevice[incomingKey] : [];
+        historyByDevice[incomingKey] = oldHistory.concat(newHistory);
+        delete historyByDevice[matchedKey];
+
+        const oldReceived = Number(receivedCountByDevice[matchedKey] || 0);
+        const newReceived = Number(receivedCountByDevice[incomingKey] || 0);
+        receivedCountByDevice[incomingKey] = oldReceived + newReceived;
+        delete receivedCountByDevice[matchedKey];
+
+        if (trackingStateByDevice[matchedKey]) {
+            if (!trackingStateHasMissionAnchor(trackingStateByDevice[incomingKey])) {
+                const mergedTracking = cloneTrackingStateForKeyMerge(trackingStateByDevice[matchedKey]);
+                if (mergedTracking) {
+                    trackingStateByDevice[incomingKey] = mergedTracking;
+                }
+            }
+        }
+        delete trackingStateByDevice[matchedKey];
+
+        const oldPlaces = Array.isArray(savedPlacesByDevice[matchedKey]) ? savedPlacesByDevice[matchedKey] : [];
+        const newPlaces = Array.isArray(savedPlacesByDevice[incomingKey]) ? savedPlacesByDevice[incomingKey] : [];
+        savedPlacesByDevice[incomingKey] = oldPlaces.concat(newPlaces);
+        delete savedPlacesByDevice[matchedKey];
+
+        const oldRoutes = Array.isArray(savedRoutesByDevice[matchedKey]) ? savedRoutesByDevice[matchedKey] : [];
+        const newRoutes = Array.isArray(savedRoutesByDevice[incomingKey]) ? savedRoutesByDevice[incomingKey] : [];
+        savedRoutesByDevice[incomingKey] = oldRoutes.concat(newRoutes);
+        delete savedRoutesByDevice[matchedKey];
+
+        if (devices[matchedKey] && !devices[incomingKey]) {
+            devices[incomingKey] = devices[matchedKey];
+        }
+        delete devices[matchedKey];
+    }
+
+    key = incomingKey;
+    stabilizedPosition.key = key;
+    stabilizedPosition.owntracksTid = owntracksTid;
+}
+
+let lastGoodByDevice = global.get("lastGoodPositionByDevice") || {};
+const prevDeviceEntry = devices[key];
+const gpsFixOk = coordinatesLookValidForBoat(stabilizedPosition);
+if (gpsFixOk) {
+    lastGoodByDevice[key] = snapshotLastGoodForDevice(stabilizedPosition, key);
+}
+global.set("lastGoodPositionByDevice", lastGoodByDevice);
+
+let positionForDeviceMap = stabilizedPosition;
+let positionForLastGlobal = stabilizedPosition;
+if (!gpsFixOk) {
+    if (coordinatesLookValidForBoat(prevDeviceEntry)) {
+        positionForDeviceMap = prevDeviceEntry;
+        positionForLastGlobal = prevDeviceEntry;
+    } else if (lastGoodByDevice[key] && coordinatesLookValidForBoat(lastGoodByDevice[key])) {
+        const frozen = lastGoodByDevice[key];
+        positionForDeviceMap = Object.assign({}, frozen, { key: key });
+        positionForLastGlobal = positionForDeviceMap;
+    }
+}
+
+global.set("lastPosition", positionForLastGlobal);
+if (!global.get("historyCleanedV2")) {
+    history = simplifyPathPreserveTail(history, SIMPLIFY_TOLERANCE_M, RECENT_UNSIMPLIFIED_POINTS);
     if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
     Object.keys(historyByDevice).forEach(function (deviceKey) {
         let deviceHistory = historyByDevice[deviceKey] || [];
-        deviceHistory = simplifyPath(deviceHistory, SIMPLIFY_TOLERANCE_M);
+        deviceHistory = simplifyPathPreserveTail(deviceHistory, SIMPLIFY_TOLERANCE_M, RECENT_UNSIMPLIFIED_POINTS);
         if (deviceHistory.length > MAX_HISTORY) deviceHistory = deviceHistory.slice(-MAX_HISTORY);
         historyByDevice[deviceKey] = deviceHistory;
     });
-    global.set("historyCleaned", true);
+    global.set("historyCleanedV2", true);
 }
 
-if (stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
+if (gpsFixOk && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
     receivedCount += 1;
     receivedCountByDevice[key] = (receivedCountByDevice[key] || 0) + 1;
 }
 
-if (trackingIsActive && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
-    const globalAppendResult = appendToHistory(history, stabilizedPosition);
-    history = globalAppendResult.history;
+const deviceTrackingState = trackingStateByDevice[key] || {};
+const trackingIsActiveForDevice = !!deviceTrackingState.active;
 
+if (trackingIsActiveForDevice && gpsFixOk && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
+    let recentSpeedsByKey = global.get("recentSpeedsByKey") || {};
+    const recentDeviceSpeedsMps = Array.isArray(recentSpeedsByKey[key]) ? recentSpeedsByKey[key] : [];
     let deviceHistory = historyByDevice[key] || [];
-    const deviceAppendResult = appendToHistory(deviceHistory, stabilizedPosition);
+    const deviceAppendResult = appendToHistory(deviceHistory, stabilizedPosition, recentDeviceSpeedsMps);
     historyByDevice[key] = deviceAppendResult.history;
+    recentSpeedsByKey[key] = deviceAppendResult.recentSpeedsMps;
+    global.set("recentSpeedsByKey", recentSpeedsByKey);
 }
 
 global.set("history", history);
 global.set("historyByDevice", historyByDevice);
 global.set("receivedCount", receivedCount);
 global.set("receivedCountByDevice", receivedCountByDevice);
+global.set("trackingStateByDevice", trackingStateByDevice);
+global.set("savedPlacesByDevice", savedPlacesByDevice);
+global.set("savedRoutesByDevice", savedRoutesByDevice);
 
-let devices = global.get("devices") || {};
-devices[key] = stabilizedPosition;
+devices[key] = positionForDeviceMap;
 global.set("devices", devices);
 
 msg.payload = stabilizedPosition;

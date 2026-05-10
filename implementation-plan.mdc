@@ -98,3 +98,28 @@ Done
 Moved the `↗` popout button in `camera-panel.js` from the left control cluster to the right side of the header by placing it after the spacer, so it appears at the top-right position as requested.
 Re-synced the updated camera panel source into `flow.json` (`cameraPanelJs`) and validated flow JSON parsing.
 
+## Step 34 - map-longpress-poi-sheet-and-configurable-route-start
+Done
+Restored via Cursor agent transcript replay: replaced the unconditional `state.map.on('click', handleMapClickRoute)` in `Maplogik` with pointer-driven gestures (`attachMapClickGestures`) that distinguish long-press (bottom sheet `#placeBottomSheet` with Nominatim details and actions) from short tap (writes into active search field when panel open).
+Restored configurable route start (`#routeStartQuery`, “Mein Standort” suggestion, `state.selectedRouteStart`/`resolveRouteStartPosition`) plus Node-RED `saveCurrentPlace` handling optional `lat`/`lon`; see transcript `60c2fea9-1636-400a-9797-4d447e418ea1` if diffs against older steps are needed.
+
+## Step 35 - remove-osrm-route-proxy
+Done
+Removed `buildRouteProxyRequestUrl` and `/api/route-proxy` usage from `Maplogik`; routing again calls public OSRM/OSM Deutschland endpoints directly from the browser via `fetchRouteGeometry`.
+Deleted the Node-RED chain `rp_proxy_http_in_7c2daa` / `proxyRoutingUpstreams` / `rp_proxy_resp_9e4fcc` from `flow.json` and re-synced the dashboard template with `sync-flow.js`.
+
+## Step 36 - empty-device-list-on-flow-start
+Done
+Documented data path: the UI loads devices via `GET /api/devices` (`apiForNewDevice` in `flow.json`), which builds `merged` from `global.get(\"devices\")` plus `global.get(\"lastGoodPositionByDevice\")` for stale-GPS fallback; each OwnTracks/MQTT message through function node `09ecbcb7cc6bb1f7` (`Tracking-Logik`) does `global.set(\"devices\", devices)` with keyed entries `user/device`.
+Set the `initialize` hook on that same `Tracking-Logik` node to `global.set(\"devices\", {})`, `global.set(\"lastGoodPositionByDevice\", {})`, and `global.set(\"lastPosition\", null)` so every deploy/restart shows an empty list until new positions arrive (saved places/routes globals are untouched).
+
+## Step 37 - deploy-empty-device-list-vs-mqtt-retain
+Done
+Retained OwnTracks MQTT payloads were refilling `global.devices` immediately after deploy, so `initialize` alone looked ineffective; added `global.set(\"__deviceIngestSilenceUntil\", Date.now() + 4000)` in the same `initialize` and an early return in `Tracking-Logik` when `Date.now() < __deviceIngestSilenceUntil` so ingest is skipped during that window (no RAM “device registry” from retained replay).
+Added tab `Tracking` inject `e7d3a1c004f14298` (`once` + `onceDelay` 4.5s) → function `clearDeviceGlobalsDelayed` (`e7d3a1c004f14299`) that clears the same globals again and sets `__deviceIngestSilenceUntil` to `0` so live points work after deploy; mirrored the silence guard in the standalone `Tracking-logik` file for parity. Long-term persistence is still Node-RED `contextStorage` (file) if enabled—exclude `devices` there or move to a DB when ready.
+
+## Step 38 - devices-api-live-session-only
+Done
+Rewrote `apiForNewDevice` (`flow.json` `1ecd66ddf2a0a1cc`) so `GET /api/devices` returns only `global.devices` entries with valid coordinates whose `receivedAt` is on or after `global.__trackingSessionEpoch`; dropped merging `lastGoodPositionByDevice` into that list so stale or file-restored “ghost” devices no longer appear as selectable rows after deploy.
+`Tracking-Logik` `initialize` now sets `__trackingSessionEpoch` to the same `Date.now()` tick as the silence window and clears `devices` / `lastGoodPositionByDevice` / `lastPosition` first, so the map’s device list stays empty until a post-deploy MQTT point is accepted (UI “Verbunden” still follows `receivedAt` freshness in `Maplogik`).
+
