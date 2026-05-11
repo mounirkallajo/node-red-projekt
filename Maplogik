@@ -651,13 +651,164 @@
       transition: none;
     }
     .place-sheet.collapsed {
-      transform: translateY(calc(100% - 200px));
+      transform: translateY(max(0px, calc(100% - 200px - 1mm)));
     }
     .place-sheet.half {
       transform: translateY(45%);
     }
     .place-sheet.expanded {
       transform: translateY(0);
+    }
+    .place-sheet.navigation-compact-active.collapsed {
+      transform: translateY(max(0px, calc(100% - 124px - 1mm)));
+    }
+    .place-sheet.navigation-compact-active.half {
+      transform: translateY(52%);
+    }
+    .place-sheet.navigation-compact-active.expanded {
+      transform: translateY(38%);
+    }
+    .place-sheet.navigation-compact-active .place-sheet-handle {
+      display: none;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-title {
+      display: none;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-actions {
+      display: none;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-content {
+      flex-direction: row;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px calc(env(safe-area-inset-bottom, 0px) + 1mm) 12px;
+      position: relative;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-header {
+      align-items: center;
+      justify-content: flex-end;
+      margin-bottom: 0;
+      order: 2;
+      flex: 0 0 auto;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-body {
+      order: 1;
+      flex: 1 1 auto;
+      min-width: 0;
+      max-height: 96px;
+      padding-top: 0;
+      padding-right: 0;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-header-actions,
+    .place-sheet.navigation-peek-collapsed .place-sheet-header-actions {
+      align-items: center;
+      transform: translateY(-1mm);
+    }
+    .place-sheet.navigation-compact-active.collapsed #placeSheetToggleExpandBtn {
+      display: none !important;
+    }
+    .place-sheet.navigation-compact-active.collapsed .place-sheet-body {
+      cursor: pointer;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-row {
+      align-items: center;
+      padding-top: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    .place-sheet.navigation-peek-collapsed .place-sheet-body {
+      display: none;
+    }
+    .place-sheet.navigation-peek-collapsed .place-sheet-content {
+      gap: 0;
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1mm);
+    }
+    .place-sheet.navigation-peek-collapsed .place-sheet-header {
+      margin-bottom: 0;
+      align-items: center;
+    }
+    .place-sheet-nav-remaining {
+      font-size: 12px;
+      font-weight: 700;
+      color: #1e2a32;
+      padding: 0 8px;
+      height: 32px;
+      display: none;
+      align-items: center;
+      border-radius: 999px;
+      background: #f6f8fa;
+      white-space: nowrap;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-nav-remaining {
+      display: inline-flex;
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+    @media (max-width: 560px) {
+      .place-sheet.navigation-compact-active .place-sheet-content {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: auto auto;
+        align-items: start;
+        column-gap: 8px;
+        row-gap: 6px;
+      }
+      .place-sheet.navigation-compact-active .place-sheet-nav-remaining {
+        grid-column: 1;
+        grid-row: 1;
+        position: static;
+        transform: none;
+        left: auto;
+        top: auto;
+        justify-self: start;
+        align-self: center;
+        max-width: 100%;
+        min-width: 0;
+        height: auto;
+        min-height: 32px;
+        padding: 4px 10px;
+        white-space: normal;
+        text-align: left;
+        line-height: 1.25;
+        box-sizing: border-box;
+      }
+      .place-sheet.navigation-compact-active .place-sheet-header {
+        grid-column: 2;
+        grid-row: 1;
+        width: auto;
+        justify-self: end;
+        justify-content: flex-end;
+      }
+      .place-sheet.navigation-compact-active .place-sheet-body {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        width: 100%;
+        max-height: 88px;
+      }
+    }
+    .place-sheet-nav-start-btn {
+      display: none;
+      height: 32px;
+      padding: 0 12px;
+      border: none;
+      border-radius: 999px;
+      background: #1e8f5e;
+      color: #fff;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+      flex: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .place-sheet.navigation-compact-active .place-sheet-nav-start-btn {
+      display: none !important;
     }
     .place-sheet-handle {
       width: 100%;
@@ -681,7 +832,7 @@
     .place-sheet-content {
       display: flex;
       flex-direction: column;
-      padding: 0 16px 16px;
+      padding: 1mm 16px calc(16px + 1mm) 16px;
       gap: 10px;
       overflow: hidden;
       flex: 1 1 auto;
@@ -699,7 +850,8 @@
       gap: 6px;
       flex: none;
     }
-    .place-sheet-toggle {
+    .place-sheet-toggle,
+    .place-sheet-center-btn {
       width: 32px;
       height: 32px;
       border: none;
@@ -714,7 +866,8 @@
       padding: 0;
       transition: background 120ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
     }
-    .place-sheet-toggle:hover {
+    .place-sheet-toggle:hover,
+    .place-sheet-center-btn:hover {
       background: #e3e9ef;
     }
     .place-sheet-toggle svg {
@@ -730,6 +883,10 @@
     }
     .place-sheet-toggle.place-sheet-toggle-open svg {
       transform: rotate(180deg);
+    }
+    .place-sheet-center-btn {
+      font-size: 18px;
+      line-height: 1;
     }
     .place-sheet-title {
       flex: 1;
@@ -1026,16 +1183,20 @@
   <div id="placeBottomSheet" class="place-sheet" role="dialog" aria-hidden="true" aria-labelledby="placeSheetTitle">
     <div class="place-sheet-handle" id="placeSheetHandle" aria-hidden="true"></div>
     <div class="place-sheet-content">
+      <div id="placeSheetNavRemaining" class="place-sheet-nav-remaining" aria-label="Reststrecke und Restzeit">—</div>
       <div class="place-sheet-header">
         <div id="placeSheetTitle" class="place-sheet-title">Ort</div>
         <div class="place-sheet-header-actions">
           <button id="placeSheetCloseBtn" class="place-sheet-close" type="button" aria-label="Schließen">&times;</button>
+          <button id="placeSheetNavCenterBtn" class="place-sheet-center-btn" type="button"
+            aria-label="Zentrieren" title="Zentrieren">◎</button>
           <button id="placeSheetToggleExpandBtn" class="place-sheet-toggle" type="button"
             aria-expanded="false" aria-controls="placeSheetBody" title="Ausklappen" aria-label="Dialog ausklappen">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M18 14l-6-6-6 6"/>
             </svg>
           </button>
+          <button id="placeSheetNavStartBtn" class="place-sheet-nav-start-btn" type="button" title="Navigation starten">Start</button>
         </div>
       </div>
       <div id="placeSheetBody" class="place-sheet-body"></div>
@@ -1087,6 +1248,34 @@
     const MAP_LONG_PRESS_DURATION_MS = 500;
     const MAP_LONG_PRESS_MAX_MOVEMENT_PIXELS = 12;
     const PLACE_SHEET_COLLAPSED_TOP_OFFSET_PX = 200;
+    const PLACE_SHEET_NAV_COMPACT_PEEK_OFFSET_PX = 124;
+    let placeSheetNavCompactPeekOneMmPxCache = null;
+    function measureOneMillimetrePxForLayout() {
+      if (placeSheetNavCompactPeekOneMmPxCache !== null) {
+        return placeSheetNavCompactPeekOneMmPxCache;
+      }
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:absolute;visibility:hidden;width:1mm;height:0;left:0;top:0;';
+      document.documentElement.appendChild(probe);
+      const widthPx = probe.getBoundingClientRect().width;
+      probe.remove();
+      placeSheetNavCompactPeekOneMmPxCache = Number.isFinite(widthPx) && widthPx > 0 ? widthPx : 0;
+      return placeSheetNavCompactPeekOneMmPxCache;
+    }
+    function getPlaceSheetNavCompactPeekOffsetPx() {
+      return PLACE_SHEET_NAV_COMPACT_PEEK_OFFSET_PX + measureOneMillimetrePxForLayout();
+    }
+    function getPlaceSheetCollapsedTopOffsetPx() {
+      return PLACE_SHEET_COLLAPSED_TOP_OFFSET_PX + measureOneMillimetrePxForLayout();
+    }
+    const NAV_GUIDANCE_COMPACT_STEP_ADVANCE_KM = 0.048;
+    const NAV_GUIDANCE_COMPACT_POLL_MS = 2200;
+    const NAV_START_FLY_TO_DURATION_SEC = 2.35;
+    const NAV_ROUTE_OVERVIEW_FLY_DURATION_SEC = 1.95;
+    const MAP_BEARING_ANIMATION_MIN_MS = 320;
+    const MAP_BEARING_ANIMATION_MAX_MS = 1100;
+    const MAP_BEARING_ANIMATION_MS_PER_DEG = 4.2;
+    const MAP_BEARING_MIN_ANIMATE_DELTA_DEG = 0.9;
 
     function loadLastHeadingsFromStorage() {
       const resultByKey = {};
@@ -1203,7 +1392,15 @@
       placeSheetCurrentPoint: null,
       placeSheetSnapState: 'collapsed',
       placeSheetDragging: false,
-      placeSheetSuppressNextMapClick: false
+      placeSheetSuppressNextMapClick: false,
+      suppressMapInteractionForAutoBearing: false,
+      placeSheetContentKind: 'place',
+      activeNavigationRouteObject: null,
+      navigationGuidanceDestinationLabel: null,
+      navigationGuidanceOverlaySuspension: null,
+      navigationGuidanceCompactActive: false,
+      navigationGuidanceStepIndex: 0,
+      navigationGuidanceCompactPollTimerId: null
     };
 
     const MAX_WAYPOINT_STOPS = 5;
@@ -1543,11 +1740,13 @@
           m = L.marker(markerLatLng, {
             icon: icon,
             zIndexOffset: 2000,
-            rotateWithView: true,
+            rotateWithView: facingMarkerRotateWithViewOption(),
             rotation: 0
           }).addTo(state.map);
           state.allDeviceMarkersByKey[deviceKey] = m;
         } else {
+          m.options.rotateWithView = facingMarkerRotateWithViewOption();
+          m.options.rotation = 0;
           m.setLatLng(markerLatLng);
           m.setIcon(icon);
         }
@@ -2233,6 +2432,9 @@
       L.control.zoom({ position: 'topright' }).addTo(state.map);
 
       const markUserInteraction = function () {
+        if (state.suppressMapInteractionForAutoBearing) {
+          return;
+        }
         state.userHasInteractedWithMap = true;
         state.shouldAutoFitTrackLine = false;
       };
@@ -2250,13 +2452,21 @@
       });
       const mapContainerElement = state.map.getContainer();
       if (mapContainerElement) {
-        const handleMapInteraction = function () {
+        const handleMapInteraction = function (domEvent) {
+          if (domEvent && domEvent.target && typeof domEvent.target.closest === 'function') {
+            if (domEvent.target.closest('.leaflet-control')) {
+              return;
+            }
+            if (domEvent.type === 'touchstart' && domEvent.touches && domEvent.touches.length >= 2) {
+              markUserInteraction();
+              return;
+            }
+          }
           markUserInteraction();
           disableAutoFollowTemporarilyByUserInteraction();
         };
         mapContainerElement.addEventListener('pointerdown', handleMapInteraction, { passive: true });
         mapContainerElement.addEventListener('touchstart', handleMapInteraction, { passive: true });
-        mapContainerElement.addEventListener('wheel', handleMapInteraction, { passive: true });
       }
 
       attachMapClickGestures(state.map);
@@ -2968,7 +3178,7 @@
         return;
       }
       clearRouteVisualization(true);
-      displayDestination(destination);
+      displayDestination(destination, { skipMapViewUpdate: true });
       state.routeLine = L.geoJSON(routeResult.route.geometry, {
         style: withVectorRenderer({
           color: '#6f42c1',
@@ -2981,6 +3191,7 @@
       setRouteInlineInfo(routeDistance, routeDuration);
       state.map.fitBounds(state.routeLine.getBounds(), { padding: [20, 20] });
       updateRouteLetterBadgesVisibility();
+      openNavigationGuidancePlaceSheet(routeResult.route, destination);
     }
 
     function hideRouteSuggestions() {
@@ -3211,6 +3422,9 @@
       if (state.routeLine) {
         state.map.removeLayer(state.routeLine);
         state.routeLine = null;
+      }
+      if (state.placeSheetContentKind === 'navigation') {
+        closePlaceSheet();
       }
       if (!keepMarkers) {
         if (state.destinationMarker) {
@@ -3848,7 +4062,7 @@
         });
         const routeUrl = routeServiceCandidate.baseUrl + '/route/v1/' + routeServiceCandidate.profile + '/' +
           coordinateParts.join(';') +
-          '?overview=full&geometries=geojson';
+          '?overview=full&geometries=geojson&steps=true';
         try {
           const routeResponse = await fetchJson(routeUrl);
           if (routeResponse && Array.isArray(routeResponse.routes) && routeResponse.routes.length > 0) {
@@ -3966,7 +4180,7 @@
       }
     }
 
-    function renderRouteStartMarker() {
+    function renderRouteStartMarker(routeStartMarkerOptions) {
       if (!state.map) {
         return;
       }
@@ -3985,7 +4199,9 @@
         icon: createRouteLabelIcon('S', 'route-label-marker-a')
       }).addTo(state.map);
       state.startMarker.bindPopup('S (Start): ' + (startEntry.label || ''));
-      updateMapViewForRouteSearchEndpoints();
+      if (!routeStartMarkerOptions || !routeStartMarkerOptions.skipMapViewUpdate) {
+        updateMapViewForRouteSearchEndpoints();
+      }
     }
 
     function updateStartInlineClearButtonVisibility() {
@@ -4059,7 +4275,7 @@
         return;
       }
       if (isMapLockedFacingPositionMarker(targetMarker)) {
-        targetMarker.options.rotateWithView = true;
+        targetMarker.options.rotateWithView = facingMarkerRotateWithViewOption();
         targetMarker.options.rotation = 0;
         if (typeof targetMarker.update === 'function' && targetMarker._map) {
           targetMarker.update();
@@ -4086,6 +4302,42 @@
       }
     }
 
+    let mapBearingAnimationRafId = 0;
+
+    function cancelMapBearingAnimation() {
+      if (mapBearingAnimationRafId && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(mapBearingAnimationRafId);
+      }
+      mapBearingAnimationRafId = 0;
+    }
+
+    function wrapHeadingDegreesForMap(deg) {
+      if (typeof deg !== 'number' || !Number.isFinite(deg)) {
+        return 0;
+      }
+      let wrappedHeading = deg % 360;
+      if (wrappedHeading < 0) {
+        wrappedHeading += 360;
+      }
+      if (wrappedHeading >= 360) {
+        wrappedHeading -= 360;
+      }
+      return wrappedHeading;
+    }
+
+    function shortestSignedBearingDeltaDegrees(fromDeg, toDeg) {
+      const wrappedFrom = wrapHeadingDegreesForMap(fromDeg);
+      const wrappedTo = wrapHeadingDegreesForMap(toDeg);
+      let deltaDegrees = wrappedTo - wrappedFrom;
+      if (deltaDegrees > 180) {
+        deltaDegrees -= 360;
+      }
+      if (deltaDegrees < -180) {
+        deltaDegrees += 360;
+      }
+      return deltaDegrees;
+    }
+
     let pendingBearingSyncFrameId = 0;
     function scheduleBearingMarkerSync() {
       if (pendingBearingSyncFrameId) {
@@ -4106,10 +4358,123 @@
       applyCounterRotationToAllPositionMarkers(counterRotationRadians);
     }
 
+    function isHeadingUpBearingControlActive() {
+      return !state.showAllDevicesOnMap;
+    }
+
+    function facingMarkerRotateWithViewOption() {
+      return !!state.showAllDevicesOnMap;
+    }
+
+    function setProgrammaticMapBearingImmediate(bearingDegrees) {
+      cancelMapBearingAnimation();
+      if (!state.map || typeof state.map.setBearing !== 'function') {
+        return;
+      }
+      const theta = typeof bearingDegrees === 'number' && Number.isFinite(bearingDegrees)
+        ? wrapHeadingDegreesForMap(bearingDegrees)
+        : 0;
+      state.suppressMapInteractionForAutoBearing = true;
+      state.map.setBearing(theta);
+      const clearSuppress = function () {
+        state.suppressMapInteractionForAutoBearing = false;
+      };
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(clearSuppress);
+      } else {
+        setTimeout(clearSuppress, 0);
+      }
+      scheduleBearingMarkerSync();
+    }
+
+    function setProgrammaticMapBearingAnimated(targetBearingDegrees) {
+      if (!state.map || typeof state.map.setBearing !== 'function' || typeof state.map.getBearing !== 'function') {
+        return;
+      }
+      if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+        const fallbackTarget = typeof targetBearingDegrees === 'number' && Number.isFinite(targetBearingDegrees)
+          ? wrapHeadingDegreesForMap(targetBearingDegrees)
+          : 0;
+        setProgrammaticMapBearingImmediate(fallbackTarget);
+        return;
+      }
+      const targetWrapped = typeof targetBearingDegrees === 'number' && Number.isFinite(targetBearingDegrees)
+        ? wrapHeadingDegreesForMap(targetBearingDegrees)
+        : 0;
+      const rawStart = state.map.getBearing();
+      const startWrapped = typeof rawStart === 'number' && Number.isFinite(rawStart)
+        ? wrapHeadingDegreesForMap(rawStart)
+        : 0;
+      const signedDelta = shortestSignedBearingDeltaDegrees(startWrapped, targetWrapped);
+      if (Math.abs(signedDelta) < MAP_BEARING_MIN_ANIMATE_DELTA_DEG) {
+        setProgrammaticMapBearingImmediate(targetWrapped);
+        return;
+      }
+      cancelMapBearingAnimation();
+      state.suppressMapInteractionForAutoBearing = true;
+      const durationMs = Math.max(
+        MAP_BEARING_ANIMATION_MIN_MS,
+        Math.min(MAP_BEARING_ANIMATION_MAX_MS, Math.abs(signedDelta) * MAP_BEARING_ANIMATION_MS_PER_DEG)
+      );
+      const animationStartMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+        ? performance.now()
+        : Date.now();
+
+      function easeOutCubic(progressUnit) {
+        return 1 - Math.pow(1 - progressUnit, 3);
+      }
+
+      function stepMapBearingAnimation(frameTimeMs) {
+        if (!state.map || typeof state.map.setBearing !== 'function') {
+          mapBearingAnimationRafId = 0;
+          state.suppressMapInteractionForAutoBearing = false;
+          return;
+        }
+        const elapsedMs = frameTimeMs - animationStartMs;
+        const progressUnit = Math.max(0, Math.min(1, elapsedMs / durationMs));
+        const easedUnit = easeOutCubic(progressUnit);
+        const interpolatedBearing = wrapHeadingDegreesForMap(startWrapped + signedDelta * easedUnit);
+        state.map.setBearing(interpolatedBearing);
+        scheduleBearingMarkerSync();
+        if (progressUnit < 1) {
+          mapBearingAnimationRafId = window.requestAnimationFrame(stepMapBearingAnimation);
+        } else {
+          state.map.setBearing(targetWrapped);
+          scheduleBearingMarkerSync();
+          mapBearingAnimationRafId = 0;
+          state.suppressMapInteractionForAutoBearing = false;
+        }
+      }
+
+      mapBearingAnimationRafId = window.requestAnimationFrame(stepMapBearingAnimation);
+    }
+
+    function syncMapBearingFromHeading(effectiveHeadingDegrees) {
+      if (!state.map || typeof state.map.setBearing !== 'function' || typeof state.map.getBearing !== 'function') {
+        return;
+      }
+      if (!isHeadingUpBearingControlActive()) {
+        const bearingNow = state.map.getBearing();
+        if (typeof bearingNow === 'number' && Number.isFinite(bearingNow) && Math.abs(bearingNow) > 0.05) {
+          setProgrammaticMapBearingAnimated(0);
+        }
+        return;
+      }
+      const hasFiniteHeading = typeof effectiveHeadingDegrees === 'number' && Number.isFinite(effectiveHeadingDegrees);
+      if (hasFiniteHeading) {
+        setProgrammaticMapBearingAnimated(effectiveHeadingDegrees);
+        return;
+      }
+      setProgrammaticMapBearingAnimated(0);
+    }
+
     function buildFacingIconSvg(normalizedHeading, accentHex) {
+      const useFixedScreenUpArrow = normalizedHeading !== null && isHeadingUpBearingControlActive();
       const arrow = normalizedHeading === null ? '' : (
-        '<g transform="rotate(' + normalizedHeading + ' 24 24)">' +
-        '<path d="M24 7.5L33.5 28.5L24 21.5L14.5 28.5Z" fill="#111"/></g>'
+        useFixedScreenUpArrow
+          ? '<g><path d="M24 7.5L33.5 28.5L24 21.5L14.5 28.5Z" fill="#111"/></g>'
+          : '<g transform="rotate(' + normalizedHeading + ' 24 24)">' +
+            '<path d="M24 7.5L33.5 28.5L24 21.5L14.5 28.5Z" fill="#111"/></g>'
       );
       return '<div class="device-facing-marker"><svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">' +
         '<circle cx="24" cy="24" r="18" fill="none" stroke="' + accentHex + '" stroke-width="2.2"/>' +
@@ -4127,7 +4492,30 @@
       });
     }
 
-    function displayDestination(destination) {
+    function areSameRouteDestinationSuggestions(firstSuggestion, secondSuggestion) {
+      if (!firstSuggestion || !secondSuggestion) {
+        return false;
+      }
+      if (typeof firstSuggestion.lat !== 'number' || typeof firstSuggestion.lon !== 'number') {
+        return false;
+      }
+      if (typeof secondSuggestion.lat !== 'number' || typeof secondSuggestion.lon !== 'number') {
+        return false;
+      }
+      if (!Number.isFinite(firstSuggestion.lat) || !Number.isFinite(firstSuggestion.lon)) {
+        return false;
+      }
+      if (!Number.isFinite(secondSuggestion.lat) || !Number.isFinite(secondSuggestion.lon)) {
+        return false;
+      }
+      const coordinateEpsilon = 1e-6;
+      return (
+        Math.abs(firstSuggestion.lat - secondSuggestion.lat) < coordinateEpsilon &&
+        Math.abs(firstSuggestion.lon - secondSuggestion.lon) < coordinateEpsilon
+      );
+    }
+
+    function displayDestination(destination, displayDestinationOptions) {
       if (!destination || typeof destination.lat !== 'number' || typeof destination.lon !== 'number') {
         throw new Error('Suchziel ist ungültig.');
       }
@@ -4138,8 +4526,10 @@
         icon: createRouteLabelIcon('A', 'route-label-marker-a')
       }).addTo(state.map);
       state.destinationMarker.bindPopup('A (Ziel): ' + destination.label);
-      renderRouteStartMarker();
-      updateMapViewForRouteSearchEndpoints();
+      renderRouteStartMarker(displayDestinationOptions);
+      if (!displayDestinationOptions || !displayDestinationOptions.skipMapViewUpdate) {
+        updateMapViewForRouteSearchEndpoints();
+      }
       updateRouteActionVisibility();
     }
 
@@ -4601,6 +4991,12 @@
 
       const routeQueryElement = byId('routeQuery');
       if (isMyLocationSuggestion) {
+        if (state.selectedRouteSuggestion &&
+          state.selectedRouteSuggestion.label === 'Mein Standort' &&
+          suggestion.source === 'myLocation') {
+          hideRouteSuggestions();
+          return;
+        }
         const currentPosition = await fetchCurrentPosition();
         if (!currentPosition) {
           window.alert('Aktueller Standort ist noch nicht verfügbar.');
@@ -4616,7 +5012,17 @@
         }
         state.selectedRouteSuggestion = myLocationDestination;
         hideRouteSuggestions();
-        displayDestination(myLocationDestination);
+        displayDestination(myLocationDestination, { skipMapViewUpdate: true });
+        const myLocationRouteApplied =
+          await applyRouteFromCurrentServerPositionToDestinationIfAvailable(myLocationDestination);
+        if (!myLocationRouteApplied) {
+          updateMapViewForRouteSearchEndpoints();
+        }
+        return;
+      }
+
+      if (areSameRouteDestinationSuggestions(state.selectedRouteSuggestion, suggestion)) {
+        hideRouteSuggestions();
         return;
       }
 
@@ -4626,7 +5032,12 @@
       state.selectedRouteSuggestion = suggestion;
       hideRouteSuggestions();
       addToRecentRouteSuggestions(suggestion);
-      displayDestination(suggestion);
+      displayDestination(suggestion, { skipMapViewUpdate: true });
+      const destinationSuggestionRouteApplied =
+        await applyRouteFromCurrentServerPositionToDestinationIfAvailable(suggestion);
+      if (!destinationSuggestionRouteApplied) {
+        updateMapViewForRouteSearchEndpoints();
+      }
     }
 
     function updateInlineClearButtonVisibility() {
@@ -5405,7 +5816,7 @@
                   effLive
                 ),
                 zIndexOffset: 2000,
-                rotateWithView: true,
+                rotateWithView: facingMarkerRotateWithViewOption(),
                 rotation: 0
               }).addTo(state.map);
               state.currentMarker.bindPopup('Aktuelle Position');
@@ -5449,7 +5860,7 @@
                 state.currentMarker = L.marker(fallbackLatLng, {
                   icon: createCurrentPositionIcon(selectedDeviceKey || '', effFb),
                   zIndexOffset: 2000,
-                  rotateWithView: true,
+                  rotateWithView: facingMarkerRotateWithViewOption(),
                   rotation: 0
                 }).addTo(state.map);
                 state.currentMarker.bindPopup('Letzte bekannte Position');
@@ -5697,9 +6108,14 @@
       }
       setRouteInlineInfo('-', '-');
       addToRecentRouteSuggestions(destination);
-      displayDestination(destination);
+      displayDestination(destination, { skipMapViewUpdate: true });
       updateWaypointButtonState();
       updateRouteLetterBadgesVisibility();
+      const mapPickDestinationRouteApplied =
+        await applyRouteFromCurrentServerPositionToDestinationIfAvailable(destination);
+      if (!mapPickDestinationRouteApplied) {
+        updateMapViewForRouteSearchEndpoints();
+      }
     }
 
     function attachMapClickGestures(mapInstance) {
@@ -5813,6 +6229,61 @@
       });
     }
 
+    function clearNavigationGuidanceOverlaySuspension() {
+      state.navigationGuidanceOverlaySuspension = null;
+    }
+
+    function captureNavigationGuidanceOverlaySuspensionIfActive() {
+      if (state.placeSheetContentKind !== 'navigation' || !state.activeNavigationRouteObject) {
+        clearNavigationGuidanceOverlaySuspension();
+        return;
+      }
+      state.navigationGuidanceOverlaySuspension = {
+        routeObject: state.activeNavigationRouteObject,
+        destinationLabel: state.navigationGuidanceDestinationLabel || 'Ziel',
+        compactActive: state.navigationGuidanceCompactActive,
+        stepIndex: state.navigationGuidanceStepIndex,
+        snapState: state.placeSheetSnapState
+      };
+    }
+
+    function restoreNavigationGuidancePlaceSheetFromSuspension(suspensionBlock) {
+      const sheetElement = byId('placeBottomSheet');
+      const titleElement = byId('placeSheetTitle');
+      const bodyElement = byId('placeSheetBody');
+      if (!sheetElement || !titleElement || !bodyElement || !suspensionBlock || !suspensionBlock.routeObject) {
+        return;
+      }
+      state.placeSheetContentKind = 'navigation';
+      state.activeNavigationRouteObject = suspensionBlock.routeObject;
+      state.navigationGuidanceDestinationLabel = suspensionBlock.destinationLabel || 'Ziel';
+      state.navigationGuidanceCompactActive = !!suspensionBlock.compactActive;
+      state.navigationGuidanceStepIndex = typeof suspensionBlock.stepIndex === 'number'
+        ? suspensionBlock.stepIndex
+        : 0;
+      if (state.navigationGuidanceCompactActive) {
+        sheetElement.classList.add('navigation-compact-active');
+      } else {
+        sheetElement.classList.remove('navigation-compact-active');
+      }
+      sheetElement.setAttribute('aria-hidden', 'false');
+      titleElement.textContent = 'Route · ' + (state.navigationGuidanceDestinationLabel || 'Ziel');
+      bodyElement.innerHTML = '';
+      renderNavigationGuidanceIntoPlaceSheetBody(suspensionBlock.routeObject);
+      applyPlaceSheetFooterForContentKind();
+      syncNavigationGuidanceStartButtonVisibility();
+      syncNavigationCenterButtonVisibility();
+      syncNavigationRemainingIndicator(collectOsrmStepsFromRouteObject(suspensionBlock.routeObject));
+      const snapName = suspensionBlock.snapState;
+      const allowedSnap = snapName === 'half' || snapName === 'expanded' ? snapName : 'collapsed';
+      setPlaceSheetSnapState(allowedSnap);
+      refreshPlaceSheetToggleButton();
+      syncNavigationPeekCollapsedClass();
+      if (state.navigationGuidanceCompactActive) {
+        beginNavigationGuidanceCompactPolling(0);
+      }
+    }
+
     async function handleMapLongPress(longPressEvent) {
       if (!longPressEvent || !longPressEvent.latlng) {
         return;
@@ -5822,6 +6293,7 @@
       if (!Number.isFinite(pressLatitude) || !Number.isFinite(pressLongitude)) {
         return;
       }
+      captureNavigationGuidanceOverlaySuspensionIfActive();
       placeLongPressMarker(pressLatitude, pressLongitude);
       const pressLabelPreview = 'Kartenpunkt: ' + pressLatitude.toFixed(5) + ', ' + pressLongitude.toFixed(5);
       openPlaceSheet({
@@ -5898,6 +6370,16 @@
       const isPeekOnly = state.placeSheetSnapState === 'collapsed';
       toggleExpandButton.classList.toggle('place-sheet-toggle-open', !isPeekOnly);
       toggleExpandButton.setAttribute('aria-expanded', isPeekOnly ? 'false' : 'true');
+      if (state.navigationGuidanceCompactActive) {
+        if (isPeekOnly) {
+          toggleExpandButton.setAttribute('aria-label', 'Navigation: Schritte nach oben ausklappen');
+          toggleExpandButton.title = 'Schritte nach oben anzeigen';
+        } else {
+          toggleExpandButton.setAttribute('aria-label', 'Navigation: Statusleiste nach unten');
+          toggleExpandButton.title = 'Auf Statusleiste reduzieren';
+        }
+        return;
+      }
       if (isPeekOnly) {
         toggleExpandButton.setAttribute('aria-label', 'Dialog ausklappen');
         toggleExpandButton.title = 'Ausklappen';
@@ -5905,6 +6387,18 @@
         toggleExpandButton.setAttribute('aria-label', 'Dialog zuklappen');
         toggleExpandButton.title = 'Zuklappen';
       }
+    }
+
+    function syncNavigationPeekCollapsedClass() {
+      const sheetElement = byId('placeBottomSheet');
+      if (!sheetElement) {
+        return;
+      }
+      const isNavigationSheet = state.placeSheetContentKind === 'navigation';
+      const shouldPeekCollapsed = isNavigationSheet &&
+        !state.navigationGuidanceCompactActive &&
+        state.placeSheetSnapState === 'collapsed';
+      sheetElement.classList.toggle('navigation-peek-collapsed', shouldPeekCollapsed);
     }
 
     function setPlaceSheetSnapState(nextSnapState) {
@@ -5918,6 +6412,7 @@
       sheetElement.classList.add(targetState);
       sheetElement.style.transform = '';
       state.placeSheetSnapState = targetState;
+      syncNavigationPeekCollapsedClass();
       refreshPlaceSheetToggleButton();
     }
 
@@ -5928,6 +6423,10 @@
       if (!sheetElement || !titleElement || !bodyElement) {
         return;
       }
+      state.placeSheetContentKind = 'place';
+      state.activeNavigationRouteObject = null;
+      state.navigationGuidanceDestinationLabel = null;
+      resetNavigationGuidanceCompactState();
       sheetElement.setAttribute('aria-hidden', 'false');
       setPlaceSheetSnapState('collapsed');
       titleElement.textContent = initialPoint && initialPoint.label
@@ -5939,23 +6438,57 @@
       state.placeSheetCurrentPoint = initialPoint && !initialPoint.loading
         ? initialPoint
         : { lat: initialPoint && initialPoint.lat, lon: initialPoint && initialPoint.lon, label: initialPoint && initialPoint.label, details: null };
+      syncNavigationGuidanceStartButtonVisibility();
+      syncNavigationPeekCollapsedClass();
     }
 
     function closePlaceSheet() {
+      const overlaySuspension = state.navigationGuidanceOverlaySuspension;
+      if (overlaySuspension && overlaySuspension.routeObject) {
+        state.navigationGuidanceOverlaySuspension = null;
+        removeLongPressMarker();
+        restoreNavigationGuidancePlaceSheetFromSuspension(overlaySuspension);
+        return;
+      }
+      clearNavigationGuidanceOverlaySuspension();
+      resetNavigationGuidanceCompactState();
       const sheetElement = byId('placeBottomSheet');
       if (sheetElement) {
         sheetElement.setAttribute('aria-hidden', 'true');
         sheetElement.classList.remove('collapsed', 'half', 'expanded');
+        sheetElement.classList.remove('navigation-peek-collapsed');
         sheetElement.style.transform = '';
       }
       state.placeSheetCurrentPoint = null;
       state.placeSheetSnapState = 'collapsed';
+      state.placeSheetContentKind = 'place';
+      state.activeNavigationRouteObject = null;
+      state.navigationGuidanceDestinationLabel = null;
+      applyPlaceSheetFooterForContentKind();
+      syncNavigationGuidanceStartButtonVisibility();
       refreshPlaceSheetToggleButton();
       removeLongPressMarker();
     }
 
+    function handlePlaceSheetBodyClickForNavigationCompactPeek() {
+      if (!state.navigationGuidanceCompactActive ||
+        state.placeSheetSnapState !== 'collapsed' ||
+        !isPlaceSheetOpen()) {
+        return;
+      }
+      setPlaceSheetSnapState('half');
+    }
+
     function togglePlaceSheetFromHeaderChevron() {
       if (!isPlaceSheetOpen()) {
+        return;
+      }
+      if (state.navigationGuidanceCompactActive) {
+        if (state.placeSheetSnapState === 'collapsed') {
+          setPlaceSheetSnapState('half');
+        } else {
+          setPlaceSheetSnapState('collapsed');
+        }
         return;
       }
       if (state.placeSheetSnapState === 'collapsed') {
@@ -5989,12 +6522,21 @@
       const startTransformForState = function (snapStateName) {
         const heightPx = sheetHeight();
         if (snapStateName === 'expanded') {
+          if (state.navigationGuidanceCompactActive) {
+            return Math.round(window.innerHeight * 0.38);
+          }
           return 0;
         }
         if (snapStateName === 'half') {
+          if (state.navigationGuidanceCompactActive) {
+            return Math.round(window.innerHeight * 0.52);
+          }
           return Math.round(window.innerHeight * 0.45);
         }
-        return Math.max(heightPx - PLACE_SHEET_COLLAPSED_TOP_OFFSET_PX, 0);
+        if (state.navigationGuidanceCompactActive) {
+          return Math.max(heightPx - getPlaceSheetNavCompactPeekOffsetPx(), 0);
+        }
+        return Math.max(heightPx - getPlaceSheetCollapsedTopOffsetPx(), 0);
       };
 
       const applyTransform = function (translateY) {
@@ -6141,6 +6683,574 @@
       rowElement.appendChild(iconElement);
       rowElement.appendChild(contentElement);
       return rowElement;
+    }
+
+    const NAV_GUIDANCE_SHEET_MAX_ROWS = 18;
+
+    function clearNavigationGuidanceCompactPoll() {
+      if (state.navigationGuidanceCompactPollTimerId !== null) {
+        clearInterval(state.navigationGuidanceCompactPollTimerId);
+        state.navigationGuidanceCompactPollTimerId = null;
+      }
+    }
+
+    function resetNavigationGuidanceCompactState() {
+      clearNavigationGuidanceCompactPoll();
+      state.navigationGuidanceCompactActive = false;
+      state.navigationGuidanceStepIndex = 0;
+      const sheetElement = byId('placeBottomSheet');
+      if (sheetElement) {
+        sheetElement.classList.remove('navigation-compact-active');
+      }
+      syncNavigationCenterButtonVisibility();
+      syncNavigationRemainingIndicator();
+    }
+
+    function closeSearchPanelKeepInputs() {
+      const searchPanelElement = byId('searchPanel');
+      if (!searchPanelElement || !searchPanelElement.classList.contains('open')) {
+        return;
+      }
+      searchPanelElement.classList.remove('open');
+      updateDialogLayout();
+      rescheduleAutoFollowResumeIfMapFollowPaused();
+    }
+
+    function reopenSearchPanelAfterNavigationInterrupt() {
+      const searchPanelElement = byId('searchPanel');
+      if (searchPanelElement) {
+        searchPanelElement.classList.add('open');
+      }
+      updateDialogLayout();
+      rescheduleAutoFollowResumeIfMapFollowPaused();
+    }
+
+    function syncNavigationGuidanceStartButtonVisibility() {
+      const startButtonElement = byId('placeSheetNavStartBtn');
+      if (!startButtonElement) {
+        return;
+      }
+      const isNavigationSheet = state.placeSheetContentKind === 'navigation';
+      const stepCount = isNavigationSheet && state.activeNavigationRouteObject
+        ? collectOsrmStepsFromRouteObject(state.activeNavigationRouteObject).length
+        : 0;
+      const shouldShowStart = isNavigationSheet &&
+        !state.navigationGuidanceCompactActive &&
+        stepCount > 0;
+      startButtonElement.style.display = shouldShowStart ? 'inline-flex' : 'none';
+    }
+
+    function navigationAdvanceGuidanceStepIndexIfNeeded(userLat, userLon) {
+      const routeObject = state.activeNavigationRouteObject;
+      const steps = collectOsrmStepsFromRouteObject(routeObject);
+      if (steps.length === 0) {
+        return;
+      }
+      let currentIdx = Math.min(Math.max(0, state.navigationGuidanceStepIndex), steps.length - 1);
+      if (currentIdx >= steps.length - 1) {
+        state.navigationGuidanceStepIndex = currentIdx;
+        return;
+      }
+      const nextStep = steps[currentIdx + 1];
+      const nextManeuver = nextStep.maneuver && typeof nextStep.maneuver === 'object' ? nextStep.maneuver : {};
+      const locationArray = Array.isArray(nextManeuver.location) ? nextManeuver.location : null;
+      if (!locationArray || locationArray.length < 2) {
+        state.navigationGuidanceStepIndex = currentIdx;
+        return;
+      }
+      const maneuverLon = Number(locationArray[0]);
+      const maneuverLat = Number(locationArray[1]);
+      if (!Number.isFinite(maneuverLat) || !Number.isFinite(maneuverLon)) {
+        state.navigationGuidanceStepIndex = currentIdx;
+        return;
+      }
+      const distanceKm = haversineKilometers(userLat, userLon, maneuverLat, maneuverLon);
+      if (distanceKm < NAV_GUIDANCE_COMPACT_STEP_ADVANCE_KM) {
+        currentIdx += 1;
+      }
+      state.navigationGuidanceStepIndex = Math.min(currentIdx, steps.length - 1);
+    }
+
+    function computeRemainingRouteMetricsFromSteps(stepList, currentStepIndex) {
+      const safeStepList = Array.isArray(stepList) ? stepList : [];
+      if (safeStepList.length === 0) {
+        return { remainingDistanceMeters: 0, remainingDurationSeconds: 0 };
+      }
+      const startIndex = Math.min(Math.max(0, Number(currentStepIndex) || 0), safeStepList.length - 1);
+      let remainingDistanceMeters = 0;
+      let remainingDurationSeconds = 0;
+      for (let stepIndex = startIndex; stepIndex < safeStepList.length; stepIndex += 1) {
+        const stepItem = safeStepList[stepIndex] && typeof safeStepList[stepIndex] === 'object'
+          ? safeStepList[stepIndex]
+          : null;
+        const stepDistance = stepItem && typeof stepItem.distance === 'number' && Number.isFinite(stepItem.distance)
+          ? stepItem.distance
+          : 0;
+        const stepDuration = stepItem && typeof stepItem.duration === 'number' && Number.isFinite(stepItem.duration)
+          ? stepItem.duration
+          : 0;
+        remainingDistanceMeters += stepDistance;
+        remainingDurationSeconds += stepDuration;
+      }
+      return { remainingDistanceMeters: remainingDistanceMeters, remainingDurationSeconds: remainingDurationSeconds };
+    }
+
+    function syncNavigationRemainingIndicator(optionalStepList) {
+      const remainingElement = byId('placeSheetNavRemaining');
+      if (!remainingElement) {
+        return;
+      }
+      if (!state.navigationGuidanceCompactActive || !state.activeNavigationRouteObject) {
+        remainingElement.textContent = '—';
+        remainingElement.removeAttribute('title');
+        return;
+      }
+      const steps = Array.isArray(optionalStepList)
+        ? optionalStepList
+        : collectOsrmStepsFromRouteObject(state.activeNavigationRouteObject);
+      const metrics = computeRemainingRouteMetricsFromSteps(steps, state.navigationGuidanceStepIndex);
+      const distanceLabel = formatDistanceMeters(metrics.remainingDistanceMeters);
+      const durationLabel = formatDurationSeconds(metrics.remainingDurationSeconds);
+      remainingElement.textContent = distanceLabel + ' · ' + durationLabel;
+      remainingElement.setAttribute('title', 'Rest: ' + distanceLabel + ' · ' + durationLabel);
+    }
+
+    function navigationGuidanceCompactPollTick() {
+      if (!state.navigationGuidanceCompactActive || !state.activeNavigationRouteObject) {
+        return;
+      }
+      fetchCurrentPosition().then(function (positionRecord) {
+        if (!positionRecord ||
+          typeof positionRecord.lat !== 'number' ||
+          typeof positionRecord.lon !== 'number' ||
+          !Number.isFinite(positionRecord.lat) ||
+          !Number.isFinite(positionRecord.lon)) {
+          return;
+        }
+        followCurrentPositionOnMap([positionRecord.lat, positionRecord.lon], false);
+        const previousIndex = state.navigationGuidanceStepIndex;
+        navigationAdvanceGuidanceStepIndexIfNeeded(positionRecord.lat, positionRecord.lon);
+        if (state.navigationGuidanceStepIndex !== previousIndex) {
+          renderNavigationGuidanceIntoPlaceSheetBody(state.activeNavigationRouteObject);
+        }
+        syncNavigationRemainingIndicator();
+      }).catch(function () {
+        /* ignore */
+      });
+    }
+
+    function beginNavigationGuidanceCompactPolling(optionalInitialDelayMs) {
+      clearNavigationGuidanceCompactPoll();
+      if (!state.navigationGuidanceCompactActive) {
+        return;
+      }
+      const startPollingLoop = function () {
+        if (!state.navigationGuidanceCompactActive) {
+          return;
+        }
+        navigationGuidanceCompactPollTick();
+        state.navigationGuidanceCompactPollTimerId = window.setInterval(
+          navigationGuidanceCompactPollTick,
+          NAV_GUIDANCE_COMPACT_POLL_MS
+        );
+      };
+      const initialDelayMs = typeof optionalInitialDelayMs === 'number' && optionalInitialDelayMs > 0
+        ? optionalInitialDelayMs
+        : 0;
+      if (initialDelayMs > 0) {
+        window.setTimeout(startPollingLoop, initialDelayMs);
+      } else {
+        startPollingLoop();
+      }
+    }
+
+    function flyMapToLatLonMaxZoomAnimated(targetLat, targetLon) {
+      if (!state.map || !Number.isFinite(targetLat) || !Number.isFinite(targetLon)) {
+        return;
+      }
+      const maxZoomLevel = typeof state.map.getMaxZoom === 'function' ? state.map.getMaxZoom() : 19;
+      const targetLatLng = L.latLng(targetLat, targetLon);
+      if (typeof state.map.invalidateSize === 'function') {
+        state.map.invalidateSize(false);
+      }
+      if (typeof state.map.flyTo === 'function') {
+        state.map.flyTo(targetLatLng, maxZoomLevel, {
+          duration: NAV_START_FLY_TO_DURATION_SEC,
+          easeLinearity: 0.18
+        });
+      } else {
+        state.map.setView(targetLatLng, maxZoomLevel, { animate: true });
+      }
+    }
+
+    async function resolveCurrentLatLonForNavigationCenter() {
+      if (state.lastKnownCurrentLatLng &&
+        state.lastKnownCurrentLatLng.length >= 2 &&
+        Number.isFinite(state.lastKnownCurrentLatLng[0]) &&
+        Number.isFinite(state.lastKnownCurrentLatLng[1])) {
+        return { lat: state.lastKnownCurrentLatLng[0], lon: state.lastKnownCurrentLatLng[1] };
+      }
+      const serverPosition = await fetchCurrentPosition();
+      if (serverPosition &&
+        typeof serverPosition.lat === 'number' &&
+        typeof serverPosition.lon === 'number' &&
+        Number.isFinite(serverPosition.lat) &&
+        Number.isFinite(serverPosition.lon)) {
+        return { lat: serverPosition.lat, lon: serverPosition.lon };
+      }
+      return null;
+    }
+
+    function syncNavigationCenterButtonVisibility() {
+      const centerButtonElement = byId('placeSheetNavCenterBtn');
+      if (!centerButtonElement) {
+        return;
+      }
+      const shouldShow = state.navigationGuidanceCompactActive;
+      centerButtonElement.style.display = shouldShow ? 'inline-flex' : 'none';
+    }
+
+    async function handleNavigationGuidanceCenterClick() {
+      if (!state.navigationGuidanceCompactActive || !state.map) {
+        return;
+      }
+      const centerLatLon = await resolveCurrentLatLonForNavigationCenter();
+      if (!centerLatLon) {
+        window.alert('Kein Standort verfügbar. Bitte zuerst den Standort laden (Ortungs-Button) oder ein Gerät mit Position wählen.');
+        return;
+      }
+      clearAutoFollowResumeTimer();
+      state.autoFollowEnabled = true;
+      state.lastKnownCurrentLatLng = [centerLatLon.lat, centerLatLon.lon];
+      window.requestAnimationFrame(function () {
+        window.requestAnimationFrame(function () {
+          if (!state.navigationGuidanceCompactActive || !state.map) {
+            return;
+          }
+          flyMapToLatLonMaxZoomAnimated(centerLatLon.lat, centerLatLon.lon);
+        });
+      });
+    }
+
+    async function handleNavigationGuidanceStartClick() {
+      if (state.placeSheetContentKind !== 'navigation' || !state.activeNavigationRouteObject) {
+        return;
+      }
+      const stepList = collectOsrmStepsFromRouteObject(state.activeNavigationRouteObject);
+      if (stepList.length === 0) {
+        window.alert('Für diese Route liegen keine Einzelschritte vor.');
+        return;
+      }
+      const sheetElement = byId('placeBottomSheet');
+      if (!sheetElement || !state.map) {
+        return;
+      }
+      const startLatLon = await resolveCurrentLatLonForNavigationCenter();
+      if (!startLatLon) {
+        window.alert('Kein Standort verfügbar. Bitte zuerst den Standort laden (Ortungs-Button) oder ein Gerät mit Position wählen.');
+        return;
+      }
+      state.navigationGuidanceCompactActive = true;
+      state.navigationGuidanceStepIndex = 0;
+      sheetElement.classList.add('navigation-compact-active');
+      closeSearchPanelKeepInputs();
+      setPlaceSheetSnapState('collapsed');
+      renderNavigationGuidanceIntoPlaceSheetBody(state.activeNavigationRouteObject);
+      applyPlaceSheetFooterForContentKind();
+      syncNavigationGuidanceStartButtonVisibility();
+      syncNavigationCenterButtonVisibility();
+      syncNavigationRemainingIndicator(stepList);
+      refreshPlaceSheetToggleButton();
+      clearAutoFollowResumeTimer();
+      state.autoFollowEnabled = true;
+      state.lastKnownCurrentLatLng = [startLatLon.lat, startLatLon.lon];
+      window.requestAnimationFrame(function () {
+        window.requestAnimationFrame(function () {
+          if (!state.navigationGuidanceCompactActive || !state.map) {
+            return;
+          }
+          flyMapToLatLonMaxZoomAnimated(startLatLon.lat, startLatLon.lon);
+        });
+      });
+      const navigationPollStartDelayMs = Math.round(NAV_START_FLY_TO_DURATION_SEC * 1000) + 320;
+      beginNavigationGuidanceCompactPolling(navigationPollStartDelayMs);
+    }
+
+    function fitMapToDisplayedRouteLineForOverview() {
+      if (!state.map || !state.routeLine || typeof state.routeLine.getBounds !== 'function') {
+        return;
+      }
+      let routeBounds;
+      try {
+        routeBounds = state.routeLine.getBounds();
+      } catch (boundsReadError) {
+        return;
+      }
+      if (!routeBounds || typeof routeBounds.isValid !== 'function' || !routeBounds.isValid()) {
+        return;
+      }
+      if (typeof state.map.invalidateSize === 'function') {
+        state.map.invalidateSize(false);
+      }
+      if (typeof state.map.flyToBounds === 'function') {
+        state.map.flyToBounds(routeBounds, {
+          padding: [20, 20],
+          duration: NAV_ROUTE_OVERVIEW_FLY_DURATION_SEC,
+          easeLinearity: 0.2
+        });
+      } else {
+        state.map.fitBounds(routeBounds, { padding: [20, 20], animate: true });
+      }
+    }
+
+    function stopNavigationInterruptCloseSheetAndOpenSearch() {
+      clearNavigationGuidanceOverlaySuspension();
+      clearAutoFollowResumeTimer();
+      state.autoFollowEnabled = false;
+      closePlaceSheet();
+      fitMapToDisplayedRouteLineForOverview();
+      const searchReopenDelayMs = typeof state.map !== 'undefined' &&
+        state.map &&
+        typeof state.map.flyToBounds === 'function'
+        ? Math.round(NAV_ROUTE_OVERVIEW_FLY_DURATION_SEC * 1000) + 220
+        : 480;
+      window.setTimeout(function () {
+        reopenSearchPanelAfterNavigationInterrupt();
+      }, searchReopenDelayMs);
+    }
+
+    function handlePlaceSheetCloseButtonClick() {
+      if (state.placeSheetContentKind === 'navigation' && state.navigationGuidanceCompactActive) {
+        stopNavigationInterruptCloseSheetAndOpenSearch();
+        return;
+      }
+      closePlaceSheet();
+    }
+
+    function collectOsrmStepsFromRouteObject(routeObject) {
+      const collectedSteps = [];
+      if (!routeObject || !Array.isArray(routeObject.legs)) {
+        return collectedSteps;
+      }
+      routeObject.legs.forEach(function (legItem) {
+        if (legItem && Array.isArray(legItem.steps)) {
+          legItem.steps.forEach(function (stepItem) {
+            collectedSteps.push(stepItem);
+          });
+        }
+      });
+      return collectedSteps;
+    }
+
+    function iconCharacterForOsrmManeuver(maneuverObject) {
+      const modifier = maneuverObject && maneuverObject.modifier ? String(maneuverObject.modifier) : '';
+      if (modifier === 'uturn' || modifier === 'sharp uturn') {
+        return '\u21A9';
+      }
+      if (modifier === 'sharp left') {
+        return '\u21B0';
+      }
+      if (modifier === 'slight left') {
+        return '\u2196';
+      }
+      if (modifier === 'left') {
+        return '\u2190';
+      }
+      if (modifier === 'sharp right') {
+        return '\u21B1';
+      }
+      if (modifier === 'slight right') {
+        return '\u2197';
+      }
+      if (modifier === 'right') {
+        return '\u2192';
+      }
+      if (modifier === 'straight') {
+        return '\u2191';
+      }
+      const maneuverType = maneuverObject && maneuverObject.type ? String(maneuverObject.type) : '';
+      if (maneuverType === 'roundabout' || maneuverType === 'rotary') {
+        return '\u27F3';
+      }
+      if (maneuverType === 'arrive') {
+        return '\u2691';
+      }
+      if (maneuverType === 'depart') {
+        return '\u25B6';
+      }
+      return '\u2022';
+    }
+
+    function germanInstructionTextForOsrmStep(stepItem) {
+      if (!stepItem || typeof stepItem !== 'object') {
+        return '';
+      }
+      const maneuverBlock = stepItem.maneuver && typeof stepItem.maneuver === 'object' ? stepItem.maneuver : {};
+      const maneuverType = maneuverBlock.type ? String(maneuverBlock.type) : '';
+      const modifierRaw = maneuverBlock.modifier ? String(maneuverBlock.modifier) : '';
+      const streetName = stepItem.name ? String(stepItem.name) : '';
+      const exitNumber = typeof maneuverBlock.exit === 'number' && Number.isFinite(maneuverBlock.exit)
+        ? maneuverBlock.exit
+        : null;
+
+      if (maneuverType === 'depart') {
+        return streetName ? 'Start auf „' + streetName + '“' : 'Route starten';
+      }
+      if (maneuverType === 'arrive') {
+        return streetName ? 'Ziel: „' + streetName + '“' : 'Ziel erreichen';
+      }
+      if (maneuverType === 'roundabout' || maneuverType === 'rotary') {
+        const exitPart = exitNumber !== null ? ' – ' + exitNumber + '. Ausfahrt' : '';
+        const namePart = streetName ? ' Richtung „' + streetName + '“' : '';
+        return 'Kreisverkehr' + exitPart + namePart;
+      }
+      if (maneuverType === 'exit roundabout' || maneuverType === 'exit rotary') {
+        return streetName ? 'Ausfahrt Richtung „' + streetName + '“' : 'Kreisverkehr verlassen';
+      }
+
+      let directionPhrase = 'Weiter';
+      if (modifierRaw === 'uturn' || modifierRaw === 'sharp uturn') {
+        directionPhrase = 'Wenden';
+      } else if (modifierRaw === 'sharp left') {
+        directionPhrase = 'Scharf links';
+      } else if (modifierRaw === 'slight left') {
+        directionPhrase = 'Leicht links';
+      } else if (modifierRaw === 'left') {
+        directionPhrase = 'Links abbiegen';
+      } else if (modifierRaw === 'sharp right') {
+        directionPhrase = 'Scharf rechts';
+      } else if (modifierRaw === 'slight right') {
+        directionPhrase = 'Leicht rechts';
+      } else if (modifierRaw === 'right') {
+        directionPhrase = 'Rechts abbiegen';
+      } else if (modifierRaw === 'straight') {
+        directionPhrase = 'Geradeaus';
+      }
+
+      if (maneuverType === 'merge') {
+        return streetName ? 'Einordnen auf „' + streetName + '“' : 'Einordnen';
+      }
+      if (maneuverType === 'fork' || maneuverType === 'off ramp' || maneuverType === 'on ramp') {
+        return streetName ? directionPhrase + ' auf „' + streetName + '“' : directionPhrase;
+      }
+      if (maneuverType === 'new name' || maneuverType === 'continue') {
+        return streetName ? 'Weiter auf „' + streetName + '“' : directionPhrase;
+      }
+      if (streetName) {
+        return directionPhrase + ' in „' + streetName + '“';
+      }
+      return directionPhrase;
+    }
+
+    function applyPlaceSheetFooterForContentKind() {
+      const markButtonElement = byId('placeSheetMarkBtn');
+      const routeButtonElement = byId('placeSheetRouteBtn');
+      if (!markButtonElement || !routeButtonElement) {
+        return;
+      }
+      if (state.placeSheetContentKind === 'navigation') {
+        markButtonElement.style.display = 'none';
+        routeButtonElement.style.display = 'none';
+        routeButtonElement.textContent = 'Route hierhin';
+        routeButtonElement.title = '';
+      } else {
+        markButtonElement.style.display = '';
+        routeButtonElement.style.display = '';
+        routeButtonElement.textContent = 'Route hierhin';
+        routeButtonElement.title = '';
+      }
+      syncNavigationGuidanceStartButtonVisibility();
+    }
+
+    function dismissNavigationGuidanceSheetKeepRoute() {
+      if (state.placeSheetContentKind !== 'navigation') {
+        return;
+      }
+      clearNavigationGuidanceOverlaySuspension();
+      closePlaceSheet();
+    }
+
+    function renderNavigationGuidanceIntoPlaceSheetBody(routeObject) {
+      const bodyElement = byId('placeSheetBody');
+      if (!bodyElement) {
+        return;
+      }
+      bodyElement.innerHTML = '';
+      const stepList = collectOsrmStepsFromRouteObject(routeObject);
+      if (stepList.length === 0) {
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          'Hinweis',
+          escapeHtmlForPlaceSheet('Für diese Route liefert der Dienst keine Einzelschritte.'),
+          '\u2139\uFE0F'
+        ));
+        return;
+      }
+      if (state.navigationGuidanceCompactActive) {
+        const clampedIndex = Math.min(Math.max(0, state.navigationGuidanceStepIndex), stepList.length - 1);
+        const stepItem = stepList[clampedIndex];
+        const maneuverBlock = stepItem.maneuver && typeof stepItem.maneuver === 'object' ? stepItem.maneuver : {};
+        const segmentDistanceMeters = typeof stepItem.distance === 'number' && Number.isFinite(stepItem.distance)
+          ? stepItem.distance
+          : 0;
+        const distanceLabel = segmentDistanceMeters > 0 ? formatDistanceMeters(segmentDistanceMeters) : '—';
+        const instructionHtml = escapeHtmlForPlaceSheet(germanInstructionTextForOsrmStep(stepItem));
+        const rowLabel = 'Schritt ' + String(clampedIndex + 1) + ' / ' + String(stepList.length) + ' · ' + distanceLabel;
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          rowLabel,
+          instructionHtml,
+          iconCharacterForOsrmManeuver(maneuverBlock)
+        ));
+        return;
+      }
+      const sliceEnd = Math.min(stepList.length, NAV_GUIDANCE_SHEET_MAX_ROWS);
+      for (let stepIndex = 0; stepIndex < sliceEnd; stepIndex += 1) {
+        const stepItem = stepList[stepIndex];
+        const maneuverBlock = stepItem.maneuver && typeof stepItem.maneuver === 'object' ? stepItem.maneuver : {};
+        const segmentDistanceMeters = typeof stepItem.distance === 'number' && Number.isFinite(stepItem.distance)
+          ? stepItem.distance
+          : 0;
+        const distanceLabel = segmentDistanceMeters > 0
+          ? formatDistanceMeters(segmentDistanceMeters)
+          : '—';
+        const instructionHtml = escapeHtmlForPlaceSheet(germanInstructionTextForOsrmStep(stepItem));
+        const rowLabel = 'Schritt ' + String(stepIndex + 1) + ' · ' + distanceLabel;
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          rowLabel,
+          instructionHtml,
+          iconCharacterForOsrmManeuver(maneuverBlock)
+        ));
+      }
+      if (stepList.length > NAV_GUIDANCE_SHEET_MAX_ROWS) {
+        bodyElement.appendChild(buildPlaceSheetRowElement(
+          '…',
+          escapeHtmlForPlaceSheet('Weitere ' + String(stepList.length - NAV_GUIDANCE_SHEET_MAX_ROWS) + ' Schritte ausgeblendet.'),
+          '…'
+        ));
+      }
+    }
+
+    function openNavigationGuidancePlaceSheet(routeObject, destination) {
+      const sheetElement = byId('placeBottomSheet');
+      const titleElement = byId('placeSheetTitle');
+      const bodyElement = byId('placeSheetBody');
+      if (!sheetElement || !titleElement || !bodyElement || !routeObject) {
+        return;
+      }
+      clearNavigationGuidanceOverlaySuspension();
+      resetNavigationGuidanceCompactState();
+      state.placeSheetContentKind = 'navigation';
+      state.activeNavigationRouteObject = routeObject;
+      state.placeSheetCurrentPoint = null;
+      sheetElement.setAttribute('aria-hidden', 'false');
+      setPlaceSheetSnapState('collapsed');
+      const destinationLabel = destination && destination.label ? String(destination.label) : 'Ziel';
+      state.navigationGuidanceDestinationLabel = destinationLabel;
+      titleElement.textContent = 'Route · ' + destinationLabel;
+      bodyElement.innerHTML = '';
+      renderNavigationGuidanceIntoPlaceSheetBody(routeObject);
+      applyPlaceSheetFooterForContentKind();
+      refreshPlaceSheetToggleButton();
+      syncNavigationPeekCollapsedClass();
     }
 
     function escapeHtmlForPlaceSheet(rawValue) {
@@ -6367,6 +7477,18 @@
         errorRow.textContent = 'Hinweis: ' + detailsError;
         bodyElement.appendChild(errorRow);
       }
+      state.placeSheetContentKind = 'place';
+      state.activeNavigationRouteObject = null;
+      resetNavigationGuidanceCompactState();
+      applyPlaceSheetFooterForContentKind();
+    }
+
+    async function handlePlaceSheetRouteButtonClick() {
+      if (state.placeSheetContentKind === 'navigation') {
+        dismissNavigationGuidanceSheetKeepRoute();
+        return;
+      }
+      await routeToPlaceSheetPoint();
     }
 
     async function savePlaceSheetPointAsPlace() {
@@ -6428,9 +7550,10 @@
       }
       updateDialogLayout();
       rescheduleAutoFollowResumeIfMapFollowPaused();
-      displayDestination(destination);
+      displayDestination(destination, { skipMapViewUpdate: true });
       const routeApplied = await applyRouteFromCurrentServerPositionToDestinationIfAvailable(destination);
       if (!routeApplied) {
+        updateMapViewForRouteSearchEndpoints();
         window.alert('Startposition konnte nicht ermittelt werden. Bitte Standort wählen oder OwnTracks-Position abwarten.');
         return;
       }
@@ -7124,7 +8247,7 @@
             interactive: false,
             keyboard: false,
             zIndexOffset: 2500,
-            rotateWithView: true,
+            rotateWithView: facingMarkerRotateWithViewOption(),
             rotation: 0
           }).addTo(state.map);
         } else {
@@ -7132,6 +8255,7 @@
           state.currentHeadingMarker.setIcon(hi);
         }
       } finally {
+        syncMapBearingFromHeading(eff);
         performBearingSyncNow();
       }
     }
@@ -7255,6 +8379,10 @@
       const dropDeviceButton = byId('dropDeviceBtn');
       const placeSheetCloseButton = byId('placeSheetCloseBtn');
       const placeSheetToggleExpandButton = byId('placeSheetToggleExpandBtn');
+      const placeSheetBodyElement = byId('placeSheetBody');
+      const placeSheetNavCenterButton = byId('placeSheetNavCenterBtn');
+      const placeSheetNavRemainingElement = byId('placeSheetNavRemaining');
+      const placeSheetNavStartButton = byId('placeSheetNavStartBtn');
       const placeSheetRouteButton = byId('placeSheetRouteBtn');
       const placeSheetMarkButton = byId('placeSheetMarkBtn');
 
@@ -7439,9 +8567,14 @@
           });
         }
       });
-      bindClickIfPresent(placeSheetCloseButton, closePlaceSheet);
+      bindClickIfPresent(placeSheetCloseButton, handlePlaceSheetCloseButtonClick);
       bindClickIfPresent(placeSheetToggleExpandButton, togglePlaceSheetFromHeaderChevron);
-      bindAsyncClickIfPresent(placeSheetRouteButton, routeToPlaceSheetPoint, 'Fehler beim Anzeigen der Route:', 'Route konnte nicht berechnet werden.');
+      if (placeSheetBodyElement) {
+        placeSheetBodyElement.addEventListener('click', handlePlaceSheetBodyClickForNavigationCompactPeek);
+      }
+      bindAsyncClickIfPresent(placeSheetNavCenterButton, handleNavigationGuidanceCenterClick, 'Fehler beim Zentrieren:', 'Standort konnte nicht ermittelt werden.');
+      bindAsyncClickIfPresent(placeSheetNavStartButton, handleNavigationGuidanceStartClick, 'Fehler beim Start der Navigation:', 'Navigation konnte nicht gestartet werden.');
+      bindAsyncClickIfPresent(placeSheetRouteButton, handlePlaceSheetRouteButtonClick, 'Fehler beim Anzeigen der Route:', 'Route konnte nicht berechnet werden.');
       bindAsyncClickIfPresent(placeSheetMarkButton, savePlaceSheetPointAsPlace, 'Fehler beim Speichern des Ortes:', 'Ort konnte nicht gespeichert werden.');
       attachPlaceSheetDragGestures();
       if (waypointSuggestionsElement) {
@@ -7469,6 +8602,10 @@
       updateRouteLetterBadgesVisibility();
       updateWaypointButtonState();
       updateDialogLayout();
+      syncNavigationCenterButtonVisibility();
+      if (placeSheetNavRemainingElement) {
+        placeSheetNavRemainingElement.textContent = '—';
+      }
     });
     })();
   </script>

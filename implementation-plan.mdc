@@ -1,149 +1,385 @@
 ## Step 1 - add-camera-proxy-routes
+
 Done
 Added new Node-RED HTTP routes for `/api/camera/stream` and `/api/camera/capture` in `flow.json`.
 Both routes now go through server-side request chains with explicit response nodes.
 
 ## Step 2 - switch-camera-config-to-relative
+
 Done
 Updated `cameraConfig` in `flow.json` to publish relative URLs for stream and capture endpoints.
 The camera host is now resolved from flow/global/env with a safe default and sanitized value.
 
 ## Step 3 - harden-client-defaults
+
 Done
 Replaced direct LAN-IP defaults in `camera-panel.js` with server-local fallback endpoints.
 This removes direct browser fallback attempts to `192.168.x.x` when config values are missing.
 
 ## Step 4 - verify-cross-subnet-path
+
 Done
 Validated `flow.json` syntax by parsing it with Node.js and checking endpoint references via search.
 Confirmed config now points stream/capture to `/api/camera/*` instead of direct camera LAN URLs.
 
 ## Step 5 - update-implementation-log
+
 Done
 Created this `implementation-plan.mdc` file because it did not exist in project root.
 Documented each plan step in order with required Done marker and two-line work summary.
 
 ## Step 6 - multi-camera-registry-and-proxy-refactor
+
 Done
 Refactored `flow.json` camera endpoints from fixed single host to camera registry resolution by `cameraId` with persistent store fallback.
 Added multi-camera management APIs (`/api/cameras`, `/api/cameras/:id`, `/api/cameras/active`) and removed all fixed `10...178` dependencies.
 
 ## Step 7 - camera-panel-1-1-multi-camera-ui
+
 Done
 Rebuilt `camera-panel.js` to support adding cameras, selecting active camera, managing list, and switching between single-view and tile-view.
 Updated runtime `cameraPanelJs` script in `flow.json` so `/api/camera-panel.js` serves multi-camera UI behavior without fixed host assumptions.
 
 ## Step 8 - validation-and-hardening
+
 Done
 Verified no remaining fixed-IP camera references and no `cameraHost` fallback dependencies tied to the old single-camera model.
 Prepared flow and client logic for restart-safe behavior by persisting camera registry in file-backed context when available.
 
 ## Step 9 - per-camera-controller-and-status-rewrite
+
 Done
 Replaced the global stream/state in `camera-panel.js` with per-camera `CameraController` instances driven by an explicit state machine, fast direct-capture probe with `sessionStorage` transport cache, dedicated `<img>`/badge per camera, and clean open/close lifecycle (no more double-init race).
 Added optional `offUrl` field to `cameraRegistryAdd`/`cameraConfig` and a new `POST /api/camera/off` route in `flow.json` (graceful when no `offUrl` is configured), plus an Aus/Ein toggle in the panel header for client-side disconnect with optional firmware-side off call. Mirrored the new client into the embedded `cameraPanelJs` function.
 
 ## Step 10 - external-stream-relay-hardening
+
 Done
 Replaced `/api/camera/stream` preparation logic in `flow.json` with a direct Node.js relay (`http` module) that pipes upstream MJPEG chunks from `<camera-host>:81/stream` straight to `msg.res` instead of buffering through the `http request` node chain.
 Configured relay response headers (`multipart/x-mixed-replace`, no-cache) and lifecycle cleanup on client disconnect/timeout to keep external access on live stream path instead of dropping to capture fallback.
 
 ## Step 11 - proxy-stream-stability-tuning
+
 Done
 Reverted to the stable Node-RED stream proxy chain and tuned client proxy handling in `camera-panel.js` to avoid immediate fallback: separate longer proxy connect timeout, bounded proxy reconnect attempts, and reconnect delay before entering capture fallback.
 Enabled persistent upstream socket on `cameraStreamRequest` (`persist: true`) in `flow.json` and mirrored the updated client script back into `cameraPanelJs` to keep served runtime logic in sync.
 
 ## Step 12 - external-snapshot-stream-mode
+
 Done
 Replaced multi-retry proxy MJPEG handling in `camera-panel.js` with a single 6 s proxy attempt, then a fast server-proxy snapshot loop (default 350 ms / ~3 FPS) presented as "Live über Server-Proxy (Snapshot)" so external clients always get a streaming experience even when MJPEG cannot be piped through Node-RED.
 Lowered server-side `fallbackIntervalMs` to 350 in `cameraConfig` (`flow.json`) and re-synced the client into the embedded `cameraPanelJs` function so the panel reliably serves live frames from anywhere via Tailscale routes without dropping to a slow capture-fallback label.
 
 ## Step 13 - camera-location-metadata-and-tailscale-subnet
+
 Done
 Added Lokal/Extern radio selector to the add-camera dialog in `camera-panel.js`, a new `location` field in `addCameraOnServer`, an entry under the camera in the manage dialog, and matching CSS for the option group; documented the one-time Tailscale subnet-router setup (`tailscale set --advertise-routes=192.168.1.0/24` on the Raspberry plus admin approval) so external browsers reach local cameras directly via the Raspberry route.
 Extended `cameraRegistryAdd` and `cameraConfig` in `flow.json` with the sanitized `location` field (default `local`, otherwise `external`) and re-synced the embedded `cameraPanelJs` payload so the served runtime matches the source script.
 
 ## Step 14 - location-priority-over-transport-cache
+
 Done
 Restructured `_beginConnect` in `camera-panel.js` to check the camera `location` (`local` / `external`) before consulting the cached `preferredTransport`, so any camera that the user explicitly placed in a Tailscale-reachable subnet always tries the direct MJPEG stream first regardless of stale session-cached fallback decisions; raised `connectTimeoutMs` to 12 s and `probeTimeoutMs` to 3 s to tolerate Tailscale relay latency.
 Re-synced the updated panel into the embedded `cameraPanelJs` function in `flow.json` and validated the whole flow parses cleanly so the Node-RED runtime now serves the new connect-priority behavior.
 
 ## Step 15 - tailscale-route-diagnostic-and-proxy-stability
+
 Done
 Added a per-camera `directRouteFailed` flag plus a dedicated hint element (orange overlay) in `camera-panel.js` that surfaces a clear "Tailscale-Subnet auf diesem Gerät akzeptieren" tip whenever a `local`/`external` camera's direct stream fails and the controller falls back to proxy/snapshot, so the user sees actionable diagnostics in the UI rather than just a silent fallback.
 Reverted `cameraStreamRequest`'s `persist` flag back to `false` in `flow.json` (persistent upstream sockets were blocking the ESP32-CAM's single MJPEG slot and producing `no response from server`) and re-synced the embedded `cameraPanelJs` runtime to keep the served script in lockstep with the source.
 
 ## Step 16 - location-aware-status-and-off-url-cleanup
+
 Done
 Refactored badge text in `camera-panel.js` to compose location-aware status labels via `composeBadgeText(state, location)` so streaming states render as "Stream aktiv (intern)" / "Stream aktiv (extern)" / "Stream aktiv (Server-Proxy) (intern|extern)" / "Snapshot-Stream (intern|extern)" instead of a generic "Direktstream aktiv".
 Removed the Off-URL input from the add-camera dialog (stock Espressif CameraWebServer firmware exposes no power-off endpoint; the panel-side Aus/Ein toggle already stops upstream traffic) and re-synced the embedded `cameraPanelJs` so the runtime UI matches the simplified source.
 
 ## Step 17 - remove-off-route-completely
+
 Done
 Deleted all `/api/camera/off` infrastructure in `flow.json` (`cam_off_http_in_8a1b22`, `cam_off_fn_8a1b23`, `cam_off_http_req_8a1b24`, `cam_off_finalize_8a1b25`, `cam_off_http_resp_8a1b26`) plus removed `offUrl`/`onUrl` from both `cameraRegistryAdd` and `cameraConfig`, leaving the registry purely focused on host/location metadata.
 Removed `callOffEndpointOnServer` and its invocation from `camera-panel.js` so `turnOff` now only suspends the controller and transitions to the Off state without any server round-trip; re-synced the embedded `cameraPanelJs` payload to match.
 
 ## Step 18 - camera-dialog-popout-window-button
+
 Done
 Added a new header button (`↗`) in `camera-panel.js` that opens the camera dialog in a separate browser window via `?cameraDialog=1`, so camera management can be moved out of the map tab and no longer overlays the main map view.
 Implemented dialog-only window mode (hides map, stretches panel fullscreen-ish, auto-opens panel, hides popout button in that window) and mirrored the updated script into `flow.json` (`cameraPanelJs`) so served runtime behavior matches source.
 
 ## Step 19 - popout-click-turns-stream-off-and-closes-main-dialog
+
 Done
 Updated the popout click logic in `camera-panel.js` so pressing `↗` now first turns off all active camera controllers (`turnOffAllControllers()`), then closes the panel on the map (`closePanel()`), and only then opens the separate popout window.
 Re-synced the updated panel script into `flow.json` (`cameraPanelJs`) and validated JSON parsing to keep deployed runtime behavior aligned with the source file.
 
 ## Step 20 - move-popout-button-top-right
+
 Done
 Moved the `↗` popout button in `camera-panel.js` from the left control cluster to the right side of the header by placing it after the spacer, so it appears at the top-right position as requested.
 Re-synced the updated camera panel source into `flow.json` (`cameraPanelJs`) and validated flow JSON parsing.
 
 ## Step 34 - map-longpress-poi-sheet-and-configurable-route-start
+
 Done
 Restored via Cursor agent transcript replay: replaced the unconditional `state.map.on('click', handleMapClickRoute)` in `Maplogik` with pointer-driven gestures (`attachMapClickGestures`) that distinguish long-press (bottom sheet `#placeBottomSheet` with Nominatim details and actions) from short tap (writes into active search field when panel open).
 Restored configurable route start (`#routeStartQuery`, “Mein Standort” suggestion, `state.selectedRouteStart`/`resolveRouteStartPosition`) plus Node-RED `saveCurrentPlace` handling optional `lat`/`lon`; see transcript `60c2fea9-1636-400a-9797-4d447e418ea1` if diffs against older steps are needed.
 
 ## Step 35 - remove-osrm-route-proxy
+
 Done
 Removed `buildRouteProxyRequestUrl` and `/api/route-proxy` usage from `Maplogik`; routing again calls public OSRM/OSM Deutschland endpoints directly from the browser via `fetchRouteGeometry`.
 Deleted the Node-RED chain `rp_proxy_http_in_7c2daa` / `proxyRoutingUpstreams` / `rp_proxy_resp_9e4fcc` from `flow.json` and re-synced the dashboard template with `sync-flow.js`.
 
 ## Step 36 - empty-device-list-on-flow-start
+
 Done
 Documented data path: the UI loads devices via `GET /api/devices` (`apiForNewDevice` in `flow.json`), which builds `merged` from `global.get(\"devices\")` plus `global.get(\"lastGoodPositionByDevice\")` for stale-GPS fallback; each OwnTracks/MQTT message through function node `09ecbcb7cc6bb1f7` (`Tracking-Logik`) does `global.set(\"devices\", devices)` with keyed entries `user/device`.
 Set the `initialize` hook on that same `Tracking-Logik` node to `global.set(\"devices\", {})`, `global.set(\"lastGoodPositionByDevice\", {})`, and `global.set(\"lastPosition\", null)` so every deploy/restart shows an empty list until new positions arrive (saved places/routes globals are untouched).
 
 ## Step 37 - deploy-empty-device-list-vs-mqtt-retain
+
 Done
 Retained OwnTracks MQTT payloads were refilling `global.devices` immediately after deploy, so `initialize` alone looked ineffective; added `global.set(\"__deviceIngestSilenceUntil\", Date.now() + 4000)` in the same `initialize` and an early return in `Tracking-Logik` when `Date.now() < __deviceIngestSilenceUntil` so ingest is skipped during that window (no RAM “device registry” from retained replay).
 Added tab `Tracking` inject `e7d3a1c004f14298` (`once` + `onceDelay` 4.5s) → function `clearDeviceGlobalsDelayed` (`e7d3a1c004f14299`) that clears the same globals again and sets `__deviceIngestSilenceUntil` to `0` so live points work after deploy; mirrored the silence guard in the standalone `Tracking-logik` file for parity. Long-term persistence is still Node-RED `contextStorage` (file) if enabled—exclude `devices` there or move to a DB when ready.
 
 ## Step 38 - devices-api-live-session-only
+
 Done
 Rewrote `apiForNewDevice` (`flow.json` `1ecd66ddf2a0a1cc`) so `GET /api/devices` returns only `global.devices` entries with valid coordinates whose `receivedAt` is on or after `global.__trackingSessionEpoch`; dropped merging `lastGoodPositionByDevice` into that list so stale or file-restored “ghost” devices no longer appear as selectable rows after deploy.
 `Tracking-Logik` `initialize` now sets `__trackingSessionEpoch` to the same `Date.now()` tick as the silence window and clears `devices` / `lastGoodPositionByDevice` / `lastPosition` first, so the map’s device list stays empty until a post-deploy MQTT point is accepted (UI “Verbunden” still follows `receivedAt` freshness in `Maplogik`).
 
 ## Step 39 - route-start-marker-map-view
+
 Done
 Added `updateMapViewForRouteSearchEndpoints()` in `Maplogik` so after a fixed start (`selectedRouteStart`) the map pans or `fitBounds` to include start and destination markers instead of leaving the S marker off-screen.
 Replaced `displayDestination`’s unconditional `setView` on the destination with the shared helper so start and goal are both visible when a custom start is set; mirrored the same script into the embedded map `template` in `flow.json`.
 
 ## Step 40 - auto-follow-resume-delay-by-search-panel
+
 Done
 Split the idle auto-follow resume delay into `AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_CLOSED` (20 s) and `AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_SEARCH_OPEN` (60 s) and wired `scheduleAutoFollowResume` through `getAutoFollowResumeDelayMs()` using `isSearchPanelOpen()`.
 Added `rescheduleAutoFollowResumeIfMapFollowPaused()` on search panel toggle, control panel toggle (search closes), and route-from-place-sheet so opening or closing the search UI resets the pending resume timer to the correct delay; re-synced the main map `template` in `flow.json` from `Maplogik`.
 
 ## Step 41 - leaflet-right-control-vertical-gap
+
 Done
 Added a small vertical gap between the rotate and zoom control blocks on the top-right stack and separated the zoom-in link from the zoom-out link inside the Leaflet zoom bar (`margin-bottom` / `border-bottom` reset).
 Re-synced the map `template` in `flow.json` from `Maplogik`.
 
 ## Step 42 - search-panel-route-row-vertical-gap
+
 Done
 Added `margin-top` between consecutive `.map-search-row` blocks inside `.search-panel` so the purple start (`useCurrentAsStartBtn`) and destination (`searchBtn`) action columns no longer sit flush when the search dialog is open.
 Re-synced the map `template` in `flow.json` from `Maplogik`.
 
 ## Step 43 - search-panel-reset-trash-beside-route-clear
+
 Done
 Replaced the temporary `<details>` menu with a single trash (`&#128465;`) action button beside `routeClearBtn` in `routeActionsRow`, grouped in `.route-action-buttons`, still calling `clearSearchInputAndMap()` for a full search/route reset.
 Re-synced the map `template` in `flow.json` from `Maplogik`.
+
+## Step 44 - map-heading-up-orientation
+
+Done
+Implemented Fahrtrichtung-oben mode in `Maplogik`: `map.setBearing` tracks effective GPS heading when the preference is on, auto-follow is active, and single-device map mode; position markers use a fixed screen-up arrow and `rotateWithView` off in that case, with programmatic bearing changes ignored for interaction flags and manual rotate disabling the mode.
+Added `#headingUpToggleBtn` (persisted `headingUpMapOrientation`), shifted the camera control left, and re-synced the dashboard `template` in `flow.json` via `sync-flow.js`.
+
+## Step 45 - map-bearing-ease-animation
+
+Done
+Split programmatic bearing into `setProgrammaticMapBearingImmediate` (toggle, manual-rotate disable) and `setProgrammaticMapBearingAnimated` used by `syncMapBearingFromHeading`, with shortest-path degree deltas, ease-out cubic interpolation, and duration clamped from turn size (`MAP_BEARING_ANIMATION_*` constants).
+Re-synced `flow.json` from `Maplogik` with `sync-flow.js`.
+
+## Step 46 - heading-up-default-no-toggle-zoom-safe
+
+Done
+Removed `#headingUpToggleBtn`, localStorage `headingUpMapOrientation`, and the rotatestart handler that cleared heading-up; `isHeadingUpBearingControlActive` is now only `!showAllDevicesOnMap` so bearing follows heading without requiring auto-follow, and map container handlers skip `disableAutoFollow` for `.leaflet-control` targets and two-finger touches while dropping the `wheel` listener so zoom does not pause follow or reset bearing.
+Re-synced `flow.json` from `Maplogik` with `sync-flow.js`.
+
+## Step 48 - route-navigation-guidance-place-sheet
+
+Done
+After `applyRouteOnMap`, the existing `#placeBottomSheet` opens in `half` with OSRM `legs[].steps` rendered via `buildPlaceSheetRowElement` (icons from maneuver modifier, German text, per-step distance); `placeSheetContentKind` toggles footer (hide mark, retitle route button to „Hinweise ausblenden“) and `handlePlaceSheetRouteButtonClick` routes to dismiss vs `routeToPlaceSheetPoint`; clearing the route line closes the sheet via `closePlaceSheet`.
+Re-synced `flow.json` from `Maplogik` with `sync-flow.js`.
+
+## Step 49 - osrm-route-request-steps-true
+
+Done
+OSRM returns empty `legs[].steps` unless the client asks for them; `fetchRouteGeometry` now appends `steps=true` to the `/route/v1/...` query alongside `overview=full` and `geometries=geojson` so turn-by-turn rows populate instead of the „keine Einzelschritte“ fallback.
+Re-synced `flow.json` from `Maplogik` with `sync-flow.js`.
+
+## Step 51 - navigation-compact-start-header
+
+Done
+`#placeSheetNavStartBtn` sits in `place-sheet-header-actions` (visuell neben Pfeil und Schließen); Start schließt nur das Suchpanel (`closeSearchPanelKeepInputs`), aktiviert `navigation-compact-active` mit schmalem Sheet, versteckt Griff/Titel/Fuß und zeigt einen OSRM-Schritt; Schließen im Kompaktmodus ruft `stopNavigationInterruptCloseSheetAndOpenSearch` (Sheet zu, Suche wieder `open`); Chevron wechselt im Kompaktmodus nur zwischen `collapsed` und `half`, Drag-Starttransform berücksichtigt `PLACE_SHEET_NAV_COMPACT_PEEK_OFFSET_PX`, Schrittfortschritt per Server-Polling.
+Re-synced `flow.json` from `Maplogik` with `sync-flow.js`.
+
+## Step 52 - navigation-start-max-zoom-follow
+
+Done
+`handleNavigationGuidanceStartClick` ermittelt zuerst `lastKnownCurrentLatLng` bzw. `fetchCurrentPosition`, bricht mit Hinweis ab wenn leer, setzt dann `clearAutoFollowResumeTimer`, `autoFollowEnabled` und Karten-Zielzoom (siehe Schritt 53 für `flyTo`); beim Kompakt-Poll `followCurrentPositionOnMap`; Start-Handler per `bindAsyncClickIfPresent` gebunden.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 53 - navigation-interrupt-route-overview-flyto-start
+
+Done
+Bei Navigationsabbruch (`stopNavigationInterruptCloseSheetAndOpenSearch`): Auto-Follow aus, danach `fitBounds` auf `state.routeLine` mit `padding: [20, 20]` und `animate: true` wie in `applyRouteOnMap`; Start nutzt `flyTo` mit `NAV_START_FLY_TO_DURATION_SEC` auf `getMaxZoom`, Fallback `setView`.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 54 - navigation-start-flyto-after-layout
+
+Done
+Start zuerst Kompakt-UI und Suchpanel-Schließen, dann doppelt `requestAnimationFrame`, `invalidateSize` und `flyMapToLatLonMaxZoomAnimated` (längere `NAV_START_FLY_TO_DURATION_SEC`); Positions-Polling startet erst nach Fly-Dauer plus Puffer, damit kein sofortiges `followCurrentPositionOnMap` die `flyTo`-Animation abbricht.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 55 - navigation-interrupt-flytobounds-overview
+
+Done
+`fitMapToDisplayedRouteLineForOverview` nutzt bei vorhandenem `flyToBounds` dieselbe Routen-Umschau wie zuvor (`padding: [20, 20]`) mit `NAV_ROUTE_OVERVIEW_FLY_DURATION_SEC` und `easeLinearity`, sonst `fitBounds` mit `animate`; vorher `invalidateSize`; Suche öffnet per Timeout erst nach Fly-Dauer, damit das Layout die Zoom-Animation nicht unterbricht.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 57 - route-suggestion-click-full-route-no-duplicate-zoom
+
+Done
+Ziel-Vorschlag: gleicher Ort erneut gewählt → nur Liste zu, keine Kartenbewegung; neues Ziel → `displayDestination` mit `skipMapViewUpdate`, danach `applyRouteFromCurrentServerPositionToDestinationIfAvailable`, Kamera nur über `applyRouteOnMap`-`fitBounds` bzw. Fallback `updateMapViewForRouteSearchEndpoints` wenn kein Start.
+`renderRouteStartMarker`/`displayDestination` akzeptieren optional `skipMapViewUpdate`; `applyRouteOnMap`, Kartenklick-Ziel und `routeToPlaceSheetPoint` nutzen dasselbe Muster gegen Zwischen-Zoom aufs Ziel.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 59 - navigation-compact-header-actions-right-aligned
+
+Done
+Step-58-Ansatz zurückgenommen (Start wieder `display: none` im Kompaktmodus, `syncNavigationGuidanceStartButtonVisibility` wieder einzeilig); Ursache für Sprung nach links war der entfallene Titel im Flex-Header — im Kompaktmodus setzt `.place-sheet-header` jetzt `justify-content: flex-end`, damit Chevron und Schließen rechts bleiben.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 60 - navigation-compact-single-row-dock-bottom
+
+Done
+Kompakt-Navigation: `.place-sheet-content` im Kompaktmodus als Zeile (`flex-direction: row`, `align-items: center`), Body `order: 1` links, Header-Aktionen `order: 2` rechts — Anweisung und Symbole auf einer Höhe; unteres Content-Padding entfernt zugunsten `env(safe-area-inset-bottom)`; kompakte Zeilen ohne unteren Rand-Strich, Body als Flex zentriert die Schrittzeile.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 61 - navigation-compact-collapsed-transform-dock
+
+Done
+Kollabiertes Sheet war kürzer als der Peek-Offset (124px): `translateY(calc(100% - 124px))` wurde negativ und hob die Leiste — unten blieb Karte sichtbar; jetzt `translateY(max(0px, calc(100% - 124px)))` (analog normales `collapsed` mit 200px), Leiste sitzt bündig am unteren Rand; `refreshPlaceSheetToggleButton` mit klaren Titeln/Aria für Kompakt-Peek (Chevron zeigt nach oben = ausklappen).
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 62 - navigation-compact-hide-chevron-peek
+
+Done
+In der kompakten Statusleiste (`navigation-compact-active.collapsed`) ist der Ausklapp-Chevron (`.place-sheet-toggle`) per CSS ausgeblendet; Klick auf `#placeSheetBody` ruft `setPlaceSheetSnapState('half')` auf, damit die Schritte weiterhin erreichbar sind; `cursor: pointer` auf dem Body in diesem Zustand.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 64 - navigation-sheet-collapsed-single-row
+
+Done
+Vor dem Start (normales Routen-Infoblatt) blendet der `collapsed`-Zustand keine 2–4 Schritte mehr ein: neue Klasse `navigation-peek-collapsed` wird automatisch gesetzt, wenn `placeSheetContentKind === 'navigation'`, Kompakt-Navigation nicht aktiv ist, und `placeSheetSnapState === 'collapsed'`. In diesem Zustand ist `place-sheet-body` ausgeblendet und es bleibt nur Überschrift + Buttons sichtbar.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 65 - remove-hinweise-ausblenden-button
+
+Done
+Im Navigations-Infoblatt wird der Button `#placeSheetRouteBtn` nicht mehr als „Hinweise ausblenden“ genutzt: bei `placeSheetContentKind === 'navigation'` ist der Button ausgeblendet (`display: none`), damit nur Start/Schließen/Pfad verfügbar sind; außerhalb Navigation bleibt er „Route hierhin“.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 66 - navigation-sheet-stays-collapsed-on-route-select
+
+Done
+Beim Auswählen/Anzeigen einer Route öffnet sich das Infoblatt nicht mehr automatisch: `openNavigationGuidancePlaceSheet` setzt `setPlaceSheetSnapState('collapsed')` statt `half`, damit standardmäßig nur Überschrift + Buttons sichtbar sind. Öffnen/Schließen bleibt per Pfad/Chevron möglich.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 67 - navigation-center-button-max-zoom
+
+Done
+Neuer Button `#placeSheetNavCenterBtn` („Zentrieren“) im Navigation-Header: sichtbar nur im gestarteten Kompaktmodus (`navigationGuidanceCompactActive`). Klick nutzt vorhandenes `flyMapToLatLonMaxZoomAnimated` und eine gemeinsame Standort-Auflösung (`resolveCurrentLatLonForNavigationCenter`, nutzt `lastKnownCurrentLatLng` oder `fetchCurrentPosition`), setzt `autoFollowEnabled` und fliegt per Animation auf Max-Zoom; Start-Handler nutzt dieselbe Standort-Auflösung, um Duplikate zu vermeiden.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 68 - center-button-visible-in-collapsed
+
+Done
+Zentrieren-Button war im Kompakt-`collapsed` unsichtbar, weil die CSS-Regel `.place-sheet.navigation-compact-active.collapsed .place-sheet-toggle { display: none !important; }` alle Toggle-Buttons getroffen hat. Zentrieren nutzt nun eigene Klasse `.place-sheet-center-btn`, und die Hide-Regel zielt nur noch auf `#placeSheetToggleExpandBtn`, damit Zentrieren neben dem Kreuz sichtbar bleibt.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 69 - navigation-compact-remaining-time-distance
+
+Done
+Im gestarteten Navigations-Kompaktmodus wird neben „Zentrieren“ die Reststrecke und Restzeit angezeigt (`#placeSheetNavRemaining`): Berechnung aus OSRM `steps` ab `navigationGuidanceStepIndex` (Summe `distance`/`duration`), Ausgabe `km · Zeit` über `formatDistanceMeters`/`formatDurationSeconds`. Aktualisierung beim Start und bei jedem Compact-Poll-Tick.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 70 - navigation-compact-center-remaining-right-buttons
+
+Done
+Restanzeige (`#placeSheetNavRemaining`) ist im Kompaktmodus mittig im Fenster positioniert (absolut zentriert in `.place-sheet-content`), während die Buttons weiterhin rechts bleiben; `pointer-events: none` verhindert, dass die Anzeige die Buttons überdeckt.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 71 - navigation-compact-mobile-no-overlap-remaining
+
+Done
+`#placeSheetNavRemaining` liegt nicht mehr in `place-sheet-header-actions`, sondern als eigenes Kind von `.place-sheet-content` (vor Header); ab `max-width: 560px` im Kompaktmodus: Spaltenlayout statt absoluter Mitte, Restanzeige umbrechend/zentriert, damit auf dem Handy keine Überlappung mit den Anweisungen entsteht (Reihenfolge der Blöcke siehe Schritt 72).
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 72 - navigation-compact-mobile-header-top
+
+Done
+Im mobilen Kompakt-Layout (`max-width: 560px`) war der Header mit Kreuz/Pfad/Zentrieren durch `order: 3` unter den Schritten gelandet; Reihenfolge angepasst auf Header `order: 1`, Restanzeige `order: 2`, Body `order: 3`, damit die Symbole wieder oben rechts sitzen und keine Überlappung mit der Restanzeige bleibt.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 73 - navigation-compact-mobile-remaining-top-left
+
+Done
+Unter `max-width: 560px` nutzt `.place-sheet-content` ein Zwei-Spalten-Grid: erste Zeile links Restzeit/Reststrecke (`text-align: left`, `justify-self: start`), rechts die Header-Aktionen; zweite Zeile über beide Spalten die Navigationsanweisungen (`place-sheet-body`).
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 74 - navigation-compact-peek-plus-1mm
+
+Done
+Kompakt-Navigation eingeklappt: sichtbare Sheet-Höhe um `1mm` vergrößert (`calc(100% - 124px - 1mm)`), Inhalt unten mit `+ 1mm` zum Safe-Area-Innenabstand; `getPlaceSheetNavCompactPeekOffsetPx()` misst `1mm` in Pixel und gleicht den Drag-Snap (`startTransformForState`) mit dem CSS ab.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 75 - route-start-sheet-peek-plus-1mm
+
+Done
+Standard-Bottomsheet eingeklappt (Route/Start, `200px`-Peek): `calc(100% - 200px - 1mm)` wie bei Kompakt; `getPlaceSheetCollapsedTopOffsetPx()` für Drag-Snap; `.place-sheet-content` mit `1mm` oben und `+ 1mm` unten; Navigation-Peek-Collapsed `padding-bottom` um `1mm` ergänzt.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 76 - navigation-peek-collapsed-content-vertical-center
+
+Done
+Im eingeklappten Navigations-Peek (`navigation-peek-collapsed`, Schritte ausgeblendet) erhält `.place-sheet-content` `justify-content: center`, damit Titelzeile und Start-/Chevron-/Schließen-Buttons vertikal mittig im sichtbaren Sheet-Bereich liegen statt optisch nach unten zu rutschen.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 77 - navigation-peek-header-cross-align-flex-start
+
+Done
+`align-items: center` auf `.place-sheet-header` im Navigations-Peek zentrierte die Buttons an der Mitte eines mehrzeiligen „Route · …“-Titels und erzeugte optisch viel Abstand über den Buttons; stattdessen `align-items: flex-start`, damit Titel und Aktionsleiste oben bündig sind und der Block durch `justify-content: center` auf dem Content weiterhin als Ganzes mittig im Sheet sitzt.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 78 - navigation-peek-header-grid-title-actions-same-row
+
+Done
+Peek-Header nutzt ein Zwei-Spalten-Grid: Titel (`grid-row: 1`) und Aktionen (`grid-column: 2`, `align-self: start`) teilen sich die erste Zeile, sodass die rechten Buttons auf der gleichen Höhe wie die erste Überschriftenzeile sitzen; mehrzeiliger Titel läuft nur in Spalte 1 weiter, ohne die Buttonzeile vertikal zu verschieben.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 79 - revert-navigation-peek-alignment-steps-76-78
+
+Done
+Schritte 76–78 in `Maplogik` zurückgenommen: Peek-`.place-sheet-content` ohne `justify-content: center`; Peek-Header wieder normales Flex aus der Basisregel `.place-sheet-header` mit `margin-bottom: 0` und `align-items: center` sowie ohne Grid/Zusatzregeln für `.place-sheet-title` (Zustand wie nach Schritt 75).
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 80 - navigation-header-actions-nudge-up-1mm
+
+Done
+`.place-sheet-header-actions` erhält `transform: translateY(-1mm)` für `navigation-compact-active` und `navigation-peek-collapsed` (gemeinsamer Selektor mit `align-items: center`), damit Start-, Pfad-/Chevron- und Schließen-Buttons optisch 1 mm nach oben rutschen.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 81 - place-sheet-center-btn-symbol-size
+
+Done
+`.place-sheet-center-btn` (Zeichen „◎“ für Zentrieren) mit `font-size: 18px` und `line-height: 1`, damit das Symbol im 32px-Kreis etwas größer und klarer wirkt.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
+## Step 82 - long-press-place-overlay-preserve-navigation-sheet
+
+Done
+Vor `openPlaceSheet` beim Langklick speichert `captureNavigationGuidanceOverlaySuspensionIfActive()` bei aktivem Navigationsblatt Route, Ziel-Label, Kompaktmodus, Schrittindex und Snap-Zustand in `navigationGuidanceOverlaySuspension`; `closePlaceSheet` stellt bei vorhandenem Overlay diese Daten per `restoreNavigationGuidancePlaceSheetFromSuspension` wieder her (ohne Sheet zu schließen), sonst wie bisher; `navigationGuidanceDestinationLabel` in `openNavigationGuidancePlaceSheet`, Suspension-Löschen bei neuer Route und bei `dismissNavigationGuidanceSheetKeepRoute` / `stopNavigationInterruptCloseSheetAndOpenSearch`.
+Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
+
