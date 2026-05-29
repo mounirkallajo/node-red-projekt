@@ -74,8 +74,9 @@ msg.payload = `(function(){
     const style=document.createElement('style');
     style.id=styleId;
     style.textContent='\
-#cameraFloatingPanel{position:absolute;top:54px;right:10px;z-index:1200;width:620px;height:420px;min-width:360px;min-height:260px;background:#fff;border:1px solid #cfd8dc;border-radius:10px;box-shadow:0 4px 14px rgba(0,0,0,.28);display:none;overflow:hidden;}\
+#cameraFloatingPanel{position:absolute;top:var(--map-ui-anchor-top,var(--map-ui-panel-top,calc(56px + env(safe-area-inset-top,0px))));right:var(--map-ui-gutter-right,calc(10px + env(safe-area-inset-right,0px)));z-index:1200;width:620px;height:420px;min-width:360px;min-height:260px;background:#fff;border:1px solid #cfd8dc;border-radius:10px;box-shadow:0 4px 14px rgba(0,0,0,.28);display:none;overflow:hidden;}\
 #cameraFloatingPanel.open{display:flex;flex-direction:column;}\
+@media (max-width:640px){#cameraFloatingPanel.open:not([data-dialog-only="1"]){left:var(--map-ui-gutter-left,calc(10px + env(safe-area-inset-left,0px)))!important;right:var(--map-ui-gutter-right,calc(10px + env(safe-area-inset-right,0px)))!important;width:auto!important;max-width:none!important;}}\
 #cameraFloatingPanel .head{display:flex;gap:8px;align-items:center;padding:8px 10px;background:#f4f7fb;border-bottom:1px solid #d9e1e8;cursor:move;}\
 #cameraFloatingPanel .head button,#cameraFloatingPanel .head select{border:1px solid #b8c5d1;background:#fff;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;}\
 #cameraFloatingPanel .head .spacer{margin-left:auto;}\
@@ -565,6 +566,12 @@ msg.payload = `(function(){
       panelOpen=true;
       panel.classList.add('open');
       toggle.classList.add('active');
+      if(typeof window.__updateMapUiLayout==='function'){
+        window.__updateMapUiLayout();
+      }else if(panel.dataset.userMoved!=='1'){
+        panel.style.top='';
+        panel.style.right='';
+      }
       refreshRegistry('').catch(function(e){
         window.alert(e&&e.message?e.message:'Kamera konnte nicht geladen werden.');
       });
@@ -801,6 +808,7 @@ msg.payload = `(function(){
         panel.style.left=Math.round(startLeft)+'px';
         panel.style.top=Math.round(startTop)+'px';
         panel.style.right='auto';
+        panel.dataset.userMoved='1';
         function onMove(moveEvent){
           const deltaX=moveEvent.clientX-startX;
           const deltaY=moveEvent.clientY-startY;
@@ -833,6 +841,7 @@ msg.payload = `(function(){
           panel.style.left=Math.round(startLeft)+'px';
           panel.style.top=Math.round(startTop)+'px';
           panel.style.right='auto';
+          panel.dataset.userMoved='1';
           function onMove(moveEvent){
             const deltaX=moveEvent.clientX-startX;
             const deltaY=moveEvent.clientY-startY;

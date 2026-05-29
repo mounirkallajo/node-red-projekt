@@ -13,9 +13,117 @@ const MAX_SPEED_JUMP_MPS = 14;
 const STATIONARY_SPEED_BASELINE_MPS = 1.5;
 const STATIONARY_HIGH_SPEED_FACTOR = 2.0;
 const RECENT_SPEED_WINDOW_SIZE = 5;
+const ROUTE_HEADING_CHANGE_DEG = 18;
+const ROUTE_STRAIGHT_DISTANCE_M = 12;
+const ROUTE_CURVE_DISTANCE_M = 3;
 const STATIONARY_SPEED_THRESHOLD_KMH = 1.8;
 const STATIONARY_DRIFT_RADIUS_M = 12;
 const STATIONARY_MAX_ACCURACY_M = 20;
+const RETAINED_MIN_DISCONNECTED_AGE_MS = 10001;
+const DEVICE_COLOR_PALETTE = [
+    "#c0392b", "#2980b9", "#27ae60", "#8e44ad",
+    "#d35400", "#16a085", "#e67e22", "#34495e",
+    "#7f8c8d", "#2c3e50", "#b03a2e", "#1f618d"
+];
+
+function normalizeDeviceColor(value) {
+    const color = typeof value === "string" ? value.trim() : "";
+    return /^#[0-9a-fA-F]{6}$/.test(color) ? color : "";
+}
+
+function ensureDeviceColor(deviceKey, devices, colorByKey) {
+    if (!deviceKey) return DEVICE_COLOR_PALETTE[0];
+    const existing = normalizeDeviceColor(colorByKey[deviceKey]) ||
+        normalizeDeviceColor(devices[deviceKey] && (devices[deviceKey].deviceColor || devices[deviceKey].color));
+    if (existing) {
+        colorByKey[deviceKey] = existing;
+        return existing;
+    }
+    const used = {};
+    Object.keys(devices || {}).forEach(function (key) {
+        if (key === deviceKey) return;
+        const color = normalizeDeviceColor(colorByKey[key]) ||
+            normalizeDeviceColor(devices[key] && (devices[key].deviceColor || devices[key].color));
+        if (color) used[color.toLowerCase()] = true;
+    });
+    const available = DEVICE_COLOR_PALETTE.filter(function (color) {
+        return !used[color.toLowerCase()];
+    });
+    let hash = 0;
+    for (let i = 0; i < deviceKey.length; i += 1) {
+        hash = ((hash << 5) - hash) + deviceKey.charCodeAt(i);
+        hash |= 0;
+    }
+    const chosen = (available.length ? available : DEVICE_COLOR_PALETTE)[(hash >>> 0) % (available.length || DEVICE_COLOR_PALETTE.length)];
+    colorByKey[deviceKey] = chosen;
+    return chosen;
+}
+
+function escapeInfluxTagValue(s) {
+    return String(s)
+        .split("\\").join("\\\\")
+        .split(" ").join("\\ ")
+        .split("=").join("\\=")
+        .split(",").join("\\,");
+}
+function influxWriteEnabled() {
+    try {
+        const dis = env.get("INFLUX_ENABLED");
+        if (dis === "false" || dis === "0") return false;
+        const base = env.get("INFLUX_URL");
+        const token = env.get("INFLUX_TOKEN");
+        const org = env.get("INFLUX_ORG");
+        const bucket = env.get("INFLUX_BUCKET");
+        return !!(base && token && org && bucket);
+    } catch (e) {
+        return false;
+    }
+}
+function buildInfluxGpsLineProtocol(deviceId, p) {
+    const tag = escapeInfluxTagValue(deviceId);
+    const ms = Number(p.timestamp);
+    const tsNs = Number.isFinite(ms) && ms > 0 ? Math.round(ms * 1000000) : Math.round(Date.now() * 1000000);
+    const fields = [];
+    if (typeof p.lat === "number" && Number.isFinite(p.lat)) fields.push("lat=" + p.lat);
+    if (typeof p.lon === "number" && Number.isFinite(p.lon)) fields.push("lon=" + p.lon);
+    if (fields.length < 2) return null;
+    if (typeof p.accuracy === "number" && Number.isFinite(p.accuracy)) fields.push("accuracy=" + p.accuracy);
+    if (typeof p.speed === "number" && Number.isFinite(p.speed)) fields.push("speed=" + p.speed);
+    if (typeof p.heading === "number" && Number.isFinite(p.heading)) fields.push("heading=" + p.heading);
+    if (typeof p.battery === "number" && Number.isFinite(p.battery)) fields.push("battery=" + Math.round(p.battery) + "i");
+    return "gps_point,device_id=" + tag + " " + fields.join(",") + " " + tsNs;
+}
+function buildInfluxWriteMessage(line) {
+    if (!line) return null;
+    try {
+        let base = String(env.get("INFLUX_URL"));
+        while (base.endsWith("/")) base = base.slice(0, -1);
+        const org = env.get("INFLUX_ORG");
+        const bucket = env.get("INFLUX_BUCKET");
+        const token = env.get("INFLUX_TOKEN");
+        const url = base + "/api/v2/write?org=" + encodeURIComponent(org) + "&bucket=" + encodeURIComponent(bucket) + "&precision=ns";
+        return {
+            method: "POST",
+            url: url,
+            headers: {
+                Authorization: "Token " + token,
+                "Content-Type": "text/plain; charset=utf-8"
+            },
+            payload: line
+        };
+    } catch (e) {
+        return null;
+    }
+}
+function buildDeviceRegistryLineProtocol(deviceId, lastSeenMs) {
+    if (!deviceId) return null;
+    const tag = escapeInfluxTagValue(deviceId);
+    const ms = Math.floor(Number(lastSeenMs));
+    const safeMs = Number.isFinite(ms) ? ms : Date.now();
+    const tsNs = Math.round(Date.now() * 1000000);
+    return "device_registry,device_id=" + tag + " last_seen_ms=" + safeMs + "i " + tsNs;
+}
+
 
 function asNumber(value) {
     if (value === undefined || value === null || value === "") {
@@ -34,6 +142,22 @@ function distanceMeters(pointA, pointB) {
         Math.cos(toRadians(pointA.lat)) * Math.cos(toRadians(pointB.lat)) *
         Math.sin(lonDelta / 2) * Math.sin(lonDelta / 2);
     return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function headingDeltaDegrees(a, b) {
+    if (!Number.isFinite(Number(a)) || !Number.isFinite(Number(b))) return 0;
+    const d = Math.abs(Number(a) - Number(b)) % 360;
+    return d > 180 ? 360 - d : d;
+}
+
+function headingFromMovement(pointA, pointB) {
+    if (!pointA || !pointB) return null;
+    const toRadians = function (degreeValue) { return degreeValue * Math.PI / 180; };
+    const y = Math.sin(toRadians(pointB.lon - pointA.lon)) * Math.cos(toRadians(pointB.lat));
+    const x = Math.cos(toRadians(pointA.lat)) * Math.sin(toRadians(pointB.lat)) -
+        Math.sin(toRadians(pointA.lat)) * Math.cos(toRadians(pointB.lat)) *
+        Math.cos(toRadians(pointB.lon - pointA.lon));
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
 function medianOfSortedNumbers(sortedValues) {
@@ -104,7 +228,16 @@ function evaluateCandidate(newPoint, previousPoint, recentSpeedsMps) {
     const newAccuracy = typeof newPoint.accuracy === "number" ? newPoint.accuracy : 0;
     const previousAccuracy = typeof previousPoint.accuracy === "number" ? previousPoint.accuracy : 0;
     const noiseRadius = Math.max(newAccuracy, previousAccuracy) * ACCURACY_DISTANCE_MULTIPLIER;
-    const effectiveMinDistance = Math.max(MIN_POINT_DISTANCE_M, noiseRadius);
+    const moveHeading = headingFromMovement(previousPoint, newPoint);
+    const previousHeading = Number.isFinite(Number(previousPoint.heading)) ? Number(previousPoint.heading) : moveHeading;
+    const nextHeading = Number.isFinite(Number(newPoint.heading)) ? Number(newPoint.heading) : moveHeading;
+    const headingChanged = headingDeltaDegrees(previousHeading, nextHeading) >= ROUTE_HEADING_CHANGE_DEG;
+    const speedKmh = typeof newPoint.speed === "number" && newPoint.speed >= 0
+        ? newPoint.speed
+        : (estimatedSpeedMps !== null ? estimatedSpeedMps * 3.6 : 0);
+    const straightDistance = speedKmh >= 20 ? ROUTE_STRAIGHT_DISTANCE_M : Math.max(MIN_POINT_DISTANCE_M, ROUTE_STRAIGHT_DISTANCE_M * 0.66);
+    const routeDistanceTarget = headingChanged ? ROUTE_CURVE_DISTANCE_M : straightDistance;
+    const effectiveMinDistance = Math.max(MIN_POINT_DISTANCE_M, noiseRadius, routeDistanceTarget);
 
     if (pointDistance < effectiveMinDistance) {
         const acceptDueToTimeWindow = timeSinceLastPoint > RECENT_POINT_WINDOW_MS;
@@ -204,6 +337,28 @@ function appendToHistory(history, position, recentSpeedsMps) {
     return { history: history, added: true, recentSpeedsMps: updatedSpeeds };
 }
 
+function appendFinalRoutePointToHistory(history, position, recentSpeedsMps) {
+    history = Array.isArray(history) ? history : [];
+    const lastPoint = history.length > 0 ? history[history.length - 1] : null;
+    if (lastPoint) {
+        if (position.trackId && lastPoint.trackId === position.trackId &&
+            position.sequenceNumber != null && lastPoint.sequenceNumber === position.sequenceNumber) {
+            return { history: history, added: false, recentSpeedsMps: recentSpeedsMps || [] };
+        }
+        if (lastPoint.timestamp === position.timestamp && lastPoint.lat === position.lat && lastPoint.lon === position.lon) {
+            return { history: history, added: false, recentSpeedsMps: recentSpeedsMps || [] };
+        }
+        const timeGapSeconds = Math.max(0.001, ((Number(position.timestamp) || Date.now()) - (Number(lastPoint.timestamp) || 0)) / 1000);
+        const estimatedSpeedMps = distanceMeters(lastPoint, position) / timeGapSeconds;
+        recentSpeedsMps = Number.isFinite(estimatedSpeedMps)
+            ? pushRecentSpeedSample(recentSpeedsMps, estimatedSpeedMps)
+            : (recentSpeedsMps || []);
+    }
+    history.push(position);
+    if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
+    return { history: history, added: true, recentSpeedsMps: recentSpeedsMps || [] };
+}
+
 function stabilizePositionForStationaryDevice(nextPosition, previousPosition) {
     if (!nextPosition || !previousPosition) {
         return nextPosition;
@@ -236,6 +391,16 @@ function stabilizePositionForStationaryDevice(nextPosition, previousPosition) {
         device: nextPosition.device,
         key: nextPosition.key,
         owntracksTid: nextPosition.owntracksTid || null,
+        source: nextPosition.source || null,
+        deviceColor: nextPosition.deviceColor || null,
+        color: nextPosition.color || nextPosition.deviceColor || null,
+        trackId: nextPosition.trackId || null,
+        sequenceNumber: nextPosition.sequenceNumber != null ? nextPosition.sequenceNumber : null,
+        routePoint: nextPosition.routePoint === true,
+        final: nextPosition.final === true,
+        liveSample: nextPosition.liveSample !== false,
+        segmentId: nextPosition.segmentId != null ? nextPosition.segmentId : null,
+        breakBefore: nextPosition.breakBefore === true,
         lat: previousPosition.lat,
         lon: previousPosition.lon,
         accuracy: nextPosition.accuracy,
@@ -290,6 +455,16 @@ function snapshotLastGoodForDevice(p, deviceKey) {
         device: p.device,
         key: deviceKey,
         owntracksTid: p.owntracksTid || null,
+        source: p.source || null,
+        deviceColor: p.deviceColor || null,
+        color: p.color || p.deviceColor || null,
+        trackId: p.trackId || null,
+        sequenceNumber: p.sequenceNumber != null ? p.sequenceNumber : null,
+        routePoint: p.routePoint === true,
+        final: p.final === true,
+        liveSample: p.liveSample !== false,
+        segmentId: p.segmentId != null ? p.segmentId : null,
+        breakBefore: p.breakBefore === true,
         lat: p.lat,
         lon: p.lon,
         accuracy: p.accuracy,
@@ -300,6 +475,19 @@ function snapshotLastGoodForDevice(p, deviceKey) {
         receivedAt: p.receivedAt
     };
 }
+
+(function seedTrackingSessionEpochOnNodeDeploy() {
+    try {
+        if (typeof context === "undefined" || !context || typeof context.get !== "function") {
+            return;
+        }
+        if (context.get("trackingSessionEpochSeeded")) {
+            return;
+        }
+        context.set("trackingSessionEpochSeeded", true);
+        global.set("__trackingSessionEpoch", Date.now());
+    } catch (seedErr) {}
+})();
 
 let raw = msg.payload;
 if (Buffer.isBuffer(raw)) raw = raw.toString("utf8");
@@ -339,8 +527,18 @@ let speed = null;
 let heading = null;
 let battery = null;
 let timestamp = Date.now();
-const receivedAt = Date.now();
+let timestampFromPayload = false;
+let trackId = null;
+let sequenceNumber = null;
+let routePoint = false;
+let segmentId = null;
+let breakBefore = false;
+const messageIsRetained = msg.retain === true || msg.retain === "true";
+const topicRoot = topicParts.length ? String(topicParts[0] || "").toLowerCase() : "";
+const payloadSource = String(p.source || "").toLowerCase();
 const isOwntracks = p._type === "location";
+const isMobileApp = payloadSource === "mobile_app" || topicRoot === "mobile_app";
+const isDemo = payloadSource === "demo" || topicRoot === "demo";
 
 if (isOwntracks) {
     lat = asNumber(p.lat);
@@ -349,7 +547,10 @@ if (isOwntracks) {
     speed = p.vel !== undefined ? asNumber(p.vel) : null;
     heading = p.cog !== undefined ? asNumber(p.cog) : null;
     battery = p.batt !== undefined ? asNumber(p.batt) : null;
-    timestamp = p.tst ? asNumber(p.tst) * 1000 : Date.now();
+    if (p.tst) {
+        timestamp = asNumber(p.tst) * 1000;
+        timestampFromPayload = true;
+    }
     if (p.tid && typeof p.tid === "string") {
         deviceId = deviceId || p.tid;
     }
@@ -360,10 +561,32 @@ if (isOwntracks) {
             deviceId = deviceId || sub[1];
         }
     }
+} else if (isMobileApp) {
+    lat = asNumber(p.lat != null ? p.lat : p.latitude);
+    lon = asNumber(p.lon != null ? p.lon : (p.lng != null ? p.lng : p.longitude));
+    accuracy = p.accuracy !== undefined ? asNumber(p.accuracy) : null;
+    speed = p.speed !== undefined ? asNumber(p.speed) : null;
+    heading = p.heading !== undefined ? asNumber(p.heading) : null;
+    battery = p.battery !== undefined ? asNumber(p.battery) : null;
+    if (p.timestamp != null) {
+        const payloadTimestamp = asNumber(p.timestamp);
+        if (!isNaN(payloadTimestamp) && payloadTimestamp > 0) {
+            timestamp = payloadTimestamp;
+            timestampFromPayload = true;
+        }
+    }
+    username = username || (typeof p.user === "string" ? p.user : "");
+    deviceId = deviceId || (typeof p.device === "string" ? p.device : "");
+    trackId = typeof p.trackId === "string" && p.trackId.trim() ? p.trackId.trim() : null;
+    const seq = asNumber(p.sequenceNumber);
+    sequenceNumber = !isNaN(seq) ? seq : null;
+    routePoint = p.routePoint === true && p.final === true;
+    segmentId = p.segmentId != null ? String(p.segmentId) : null;
+    breakBefore = p.breakBefore === true;
 } else {
     const coords = p.coords && typeof p.coords === "object" ? p.coords : null;
     lat = asNumber(p.lat != null ? p.lat : p.latitude);
-    lon = asNumber(p.lon != null ? p.lon : p.longitude);
+    lon = asNumber(p.lon != null ? p.lon : (p.lng != null ? p.lng : p.longitude));
     if (coords && (isNaN(lat) || isNaN(lon))) {
         lat = asNumber(coords.lat != null ? coords.lat : coords.latitude);
         lon = asNumber(coords.lon != null ? coords.lon : (coords.longitude != null ? coords.longitude : coords.lng));
@@ -371,6 +594,13 @@ if (isOwntracks) {
     username = username || (typeof p.user === "string" ? p.user : "");
     deviceId = deviceId || (typeof p.device === "string" ? p.device : "") || (typeof p.name === "string" ? p.name : "");
 }
+
+if (messageIsRetained && !timestampFromPayload) timestamp = 0;
+const nowAtReceive = Date.now();
+const retainedTimestamp = Number(timestamp);
+const receivedAt = messageIsRetained
+    ? (timestampFromPayload && Number.isFinite(retainedTimestamp) && retainedTimestamp > 0 ? Math.min(retainedTimestamp, nowAtReceive - RETAINED_MIN_DISCONNECTED_AGE_MS) : 0)
+    : nowAtReceive;
 
 const hasCoordinateNumbers = !isNaN(lat) && !isNaN(lon);
 if (hasCoordinateNumbers && (lat < -90 || lat > 90 || lon < -180 || lon > 180)) {
@@ -394,6 +624,14 @@ const position = {
     device: deviceId,
     key: key,
     owntracksTid: owntracksTid || null,
+    source: isOwntracks ? "owntracks" : (isMobileApp ? "mobile_app" : (isDemo ? "demo" : "mqtt")),
+    trackId: trackId,
+    sequenceNumber: sequenceNumber,
+    routePoint: routePoint,
+    final: routePoint,
+    liveSample: !routePoint,
+    segmentId: segmentId,
+    breakBefore: breakBefore,
     lat: lat,
     lon: lon,
     accuracy: accuracy !== null && !isNaN(accuracy) ? accuracy : null,
@@ -405,8 +643,10 @@ const position = {
 };
 
 let devices = global.get("devices") || {};
+let deviceColorByKey = global.get("deviceColorByKey") || {};
 const previousDevicePosition = devices[key] && typeof devices[key] === "object" ? devices[key] : null;
-const stabilizedPosition = stabilizePositionForStationaryDevice(position, previousDevicePosition);
+// Position filtering is client-side only (phone display + upload). Server stores points as received.
+const stabilizedPosition = position;
 
 let history = global.get("history") || [];
 let historyByDevice = global.get("historyByDevice") || {};
@@ -465,6 +705,10 @@ if (owntracksTid) {
         if (devices[matchedKey] && !devices[incomingKey]) {
             devices[incomingKey] = devices[matchedKey];
         }
+        if (deviceColorByKey[matchedKey] && !deviceColorByKey[incomingKey]) {
+            deviceColorByKey[incomingKey] = deviceColorByKey[matchedKey];
+        }
+        delete deviceColorByKey[matchedKey];
         delete devices[matchedKey];
     }
 
@@ -472,10 +716,44 @@ if (owntracksTid) {
     stabilizedPosition.key = key;
     stabilizedPosition.owntracksTid = owntracksTid;
 }
+const assignedDeviceColor = ensureDeviceColor(key, devices, deviceColorByKey);
+stabilizedPosition.deviceColor = assignedDeviceColor;
+stabilizedPosition.color = assignedDeviceColor;
+global.set("deviceColorByKey", deviceColorByKey);
 
 let lastGoodByDevice = global.get("lastGoodPositionByDevice") || {};
 const prevDeviceEntry = devices[key];
 const gpsFixOk = coordinatesLookValidForBoat(stabilizedPosition);
+const deletedDeviceKeys = global.get("deletedDeviceKeys") || {};
+const deletedAt = Number(deletedDeviceKeys[key] || 0);
+if (deletedAt > 0) {
+    if (!gpsFixOk || messageIsRetained) return null;
+    delete deletedDeviceKeys[key];
+    global.set("deletedDeviceKeys", deletedDeviceKeys);
+}
+if (gpsFixOk && !messageIsRetained && stabilizedPosition.source === "mobile_app" &&
+    stabilizedPosition.routePoint === true && stabilizedPosition.final === true) {
+    const sequenceStoreKey = key + "|" + (stabilizedPosition.trackId || "");
+    let mobileSequenceByTrack = global.get("mobileTrackSequenceByKey") || {};
+    const previousSequence = mobileSequenceByTrack[sequenceStoreKey] || {};
+    const incomingSequence = Number(stabilizedPosition.sequenceNumber);
+    const previousSequenceNumber = Number(previousSequence.sequenceNumber);
+    const incomingTimestamp = Number(stabilizedPosition.timestamp);
+    const previousTimestamp = Number(previousSequence.timestamp);
+    if (Number.isFinite(incomingSequence) && Number.isFinite(previousSequenceNumber) && incomingSequence <= previousSequenceNumber &&
+        (!Number.isFinite(incomingTimestamp) || !Number.isFinite(previousTimestamp) || incomingTimestamp <= previousTimestamp)) {
+        return null;
+    }
+    if (!Number.isFinite(incomingSequence) && Number.isFinite(incomingTimestamp) &&
+        Number.isFinite(previousTimestamp) && incomingTimestamp <= previousTimestamp) {
+        return null;
+    }
+    mobileSequenceByTrack[sequenceStoreKey] = {
+        sequenceNumber: Number.isFinite(incomingSequence) ? incomingSequence : previousSequence.sequenceNumber,
+        timestamp: Number.isFinite(incomingTimestamp) ? incomingTimestamp : Date.now()
+    };
+    global.set("mobileTrackSequenceByKey", mobileSequenceByTrack);
+}
 if (gpsFixOk) {
     lastGoodByDevice[key] = snapshotLastGoodForDevice(stabilizedPosition, key);
 }
@@ -495,6 +773,9 @@ if (!gpsFixOk) {
 }
 
 global.set("lastPosition", positionForLastGlobal);
+let lastPositionByDevice = global.get("lastPositionByDevice") || {};
+lastPositionByDevice[key] = positionForLastGlobal;
+global.set("lastPositionByDevice", lastPositionByDevice);
 if (!global.get("historyCleanedV2")) {
     history = simplifyPathPreserveTail(history, SIMPLIFY_TOLERANCE_M, RECENT_UNSIMPLIFIED_POINTS);
     if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
@@ -507,22 +788,45 @@ if (!global.get("historyCleanedV2")) {
     global.set("historyCleanedV2", true);
 }
 
-if (gpsFixOk && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
+if (!messageIsRetained && gpsFixOk && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
     receivedCount += 1;
     receivedCountByDevice[key] = (receivedCountByDevice[key] || 0) + 1;
 }
 
 const deviceTrackingState = trackingStateByDevice[key] || {};
 const trackingIsActiveForDevice = !!deviceTrackingState.active;
+const mobileFinalRoutePoint = stabilizedPosition.source === "mobile_app" &&
+    stabilizedPosition.routePoint === true && stabilizedPosition.final === true;
+const serverReducedRoutePoint = stabilizedPosition.source !== "mobile_app" && trackingIsActiveForDevice;
+let routeAppendAdded = false;
 
-if (trackingIsActiveForDevice && gpsFixOk && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
+if (!messageIsRetained && gpsFixOk && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null &&
+    (mobileFinalRoutePoint || serverReducedRoutePoint)) {
     let recentSpeedsByKey = global.get("recentSpeedsByKey") || {};
     const recentDeviceSpeedsMps = Array.isArray(recentSpeedsByKey[key]) ? recentSpeedsByKey[key] : [];
     let deviceHistory = historyByDevice[key] || [];
-    const deviceAppendResult = appendToHistory(deviceHistory, stabilizedPosition, recentDeviceSpeedsMps);
+    const deviceAppendResult = mobileFinalRoutePoint
+        ? appendFinalRoutePointToHistory(deviceHistory, stabilizedPosition, recentDeviceSpeedsMps)
+        : appendToHistory(deviceHistory, stabilizedPosition, recentDeviceSpeedsMps);
     historyByDevice[key] = deviceAppendResult.history;
+    history = historyByDevice[key];
     recentSpeedsByKey[key] = deviceAppendResult.recentSpeedsMps;
+    routeAppendAdded = !!deviceAppendResult.added;
     global.set("recentSpeedsByKey", recentSpeedsByKey);
+}
+
+let influxSecondMsg = null;
+if (!messageIsRetained && influxWriteEnabled() && gpsFixOk && stabilizedPosition.lat !== null && stabilizedPosition.lon !== null) {
+    const regLine = buildDeviceRegistryLineProtocol(key, Date.now());
+    let gpsLine = null;
+    if (routeAppendAdded) {
+        gpsLine = buildInfluxGpsLineProtocol(key, stabilizedPosition);
+    }
+    if (gpsLine) {
+        influxSecondMsg = buildInfluxWriteMessage(gpsLine + "\n" + regLine);
+    } else {
+        influxSecondMsg = buildInfluxWriteMessage(regLine);
+    }
 }
 
 global.set("history", history);
@@ -533,8 +837,32 @@ global.set("trackingStateByDevice", trackingStateByDevice);
 global.set("savedPlacesByDevice", savedPlacesByDevice);
 global.set("savedRoutesByDevice", savedRoutesByDevice);
 
-devices[key] = positionForDeviceMap;
+let deviceMapEntry = positionForDeviceMap;
+if (deviceMapEntry && typeof deviceMapEntry === "object") {
+    deviceMapEntry = Object.assign({}, positionForDeviceMap);
+    if (!gpsFixOk) {
+        let preservedReceivedAt = NaN;
+        if (prevDeviceEntry && typeof prevDeviceEntry === "object") {
+            preservedReceivedAt = Number(prevDeviceEntry.receivedAt);
+        }
+        if (!Number.isFinite(preservedReceivedAt) || preservedReceivedAt <= 0) {
+            const lastGoodSnapshot = lastGoodByDevice[key];
+            if (lastGoodSnapshot && typeof lastGoodSnapshot === "object") {
+                preservedReceivedAt = Number(lastGoodSnapshot.receivedAt);
+            }
+        }
+        if (Number.isFinite(preservedReceivedAt) && preservedReceivedAt > 0) {
+            deviceMapEntry.receivedAt = preservedReceivedAt;
+        } else {
+            const tsOnly = Number(deviceMapEntry.timestamp);
+            deviceMapEntry.receivedAt = Number.isFinite(tsOnly) && tsOnly > 0 ? tsOnly : 0;
+        }
+    }
+    deviceMapEntry.deviceColor = assignedDeviceColor;
+    deviceMapEntry.color = assignedDeviceColor;
+}
+devices[key] = deviceMapEntry;
 global.set("devices", devices);
 
 msg.payload = stabilizedPosition;
-return msg;
+return [msg, influxSecondMsg];

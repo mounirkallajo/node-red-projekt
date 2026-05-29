@@ -383,3 +383,148 @@ Done
 Vor `openPlaceSheet` beim Langklick speichert `captureNavigationGuidanceOverlaySuspensionIfActive()` bei aktivem Navigationsblatt Route, Ziel-Label, Kompaktmodus, Schrittindex und Snap-Zustand in `navigationGuidanceOverlaySuspension`; `closePlaceSheet` stellt bei vorhandenem Overlay diese Daten per `restoreNavigationGuidancePlaceSheetFromSuspension` wieder her (ohne Sheet zu schließen), sonst wie bisher; `navigationGuidanceDestinationLabel` in `openNavigationGuidancePlaceSheet`, Suspension-Löschen bei neuer Route und bei `dismissNavigationGuidanceSheetKeepRoute` / `stopNavigationInterruptCloseSheetAndOpenSearch`.
 Re-synced `flow.json` from `Maplogik` mit `sync-flow.js`.
 
+## Step 83 - influxdb-2-gps-persistence
+
+Done
+`flow.json`: Tracking-Logik schreibt bei aktivem Tracking und neuem History-Punkt zusätzlich Line Protocol nach Influx (`gps_point`, Tag `device_id`); zweiter Ausgang an HTTP-Request-Node `Influx write gps_point`. `GET /api/history` und `GET /api/history/:user/:device` lesen per Flux (letzte 2000 Punkte, 30 Tage) aus Influx mit Fallback auf Globals; `DELETE /api/devices/...` und `POST /api/reset` rufen die Influx-Delete-API auf. Umgebungsvariablen dokumentiert in `INFLUX.md`; `Tracking-logik` aus dem gepatchten Function-String synchronisiert; Patch-Skript `scripts/patch-influx-flow.cjs` für nachvollziehbare Änderungen.
+
+## Step 84 - influx-function-nodes-use-fetch-not-require
+
+Done
+Die vier API-Function-Nodes mit Influx (`history`, `HistoryForSpesificDevices`, `deleteDeviceData`, `resetAllData`) riefen `require("http")` auf; in der Node-RED-Sandbox ist `require` nicht definiert (`require is not defined`). `httpPostJson` nutzt jetzt natives `fetch` (Node 18+). Skript `scripts/fix-influx-fetch.cjs`; `patch-influx-flow.cjs` angepasst für künftige Referenz; `INFLUX.md` um Hinweis ergänzt.
+
+## Step 85 - influx-httpPostJson-fetch-or-require-fallback
+
+Done
+Auf dem Pi fehlte `fetch` in der Function-Sandbox trotz älterem Node (`fetch is not available`). `httpPostJson` in `flow.json` (vier Nodes) auf Hybrid umgestellt: zuerst `fetch`, sonst `http`/`https` über `require`, mit klarer Fehlermeldung wenn `require` fehlt. `scripts/fix-influx-http-hybrid.cjs` ergänzt, `patch-influx-flow.cjs` (`SHARED_HTTP`) und `INFLUX.md` um `functionGlobalContext: { require: require }` dokumentiert.
+
+## Step 86 - influx-httpPostJson-use-global-get-require
+
+Done
+`functionGlobalContext.require` wird in Node-RED Function-Nodes nicht als globales `require` injiziert, sondern nur als `global.get("require")`. `httpPostJson` in `flow.json`, `fix-influx-http-hybrid.cjs` und `patch-influx-flow.cjs` angepasst; `INFLUX.md` um diesen Hinweis ergänzt.
+
+## Step 87 - influx-httpPostJson-global-http-https-modules
+
+Done
+Zusätzlicher Fallback: `global.get("http")` / `global.get("https")` aus `functionGlobalContext`, weil `global.get("require")` je nach Installation leer bleibt; empfohlene `settings.js`-Variante mit direkten Modulen dokumentiert (`INFLUX.md`, Pfad `/var/lib/nodered` bei systemd). `flow.json` per `fix-influx-http-hybrid.cjs` und `SHARED_HTTP` in `patch-influx-flow.cjs` aktualisiert.
+
+## Step 88 - influx-httpPostJson-context-global-get-node22
+
+Done
+Unter Node.js 22+ schattet das eingebaute `global` die Node-RED-Context-API; `typeof global.get === "function"` war falsch, sodass `functionGlobalContext` nie gelesen wurde. `httpPostJson` liest Modulnamen jetzt zuerst über `context.global.get`, dann Fallback `global.get`; `fix-influx-http-hybrid.cjs`, `patch-influx-flow.cjs`, `flow.json`, `INFLUX.md` angepasst.
+
+## Step 89 - influx-functionGlobalContext-influxHttp-keys
+
+Done
+Zusätzlich `influxHttp`/`influxHttps` als bevorzugte Schlüssel (Nebenwirkungen mit kurzem Namen `http` vermeiden), `global.get` zuerst wie in der Node-RED-VM; Diagnosebefehl für `settings.js` in `INFLUX.md`; `flow.json` und Skripte angepasst.
+
+## Step 90 - influx-httpPostJson-via-function-node-libs
+
+Done
+`functionGlobalContext` mit `http`/`https` lieferte auf dem Pi weiterhin leere `global.get`-Werte; die vier Influx-Function-Nodes laden `http`/`https` jetzt über eingebaute **Module (`libs` → `nodeHttp`/`nodeHttps`)**, unabhängig von `settings.js`. `fix-influx-http-hybrid.cjs`, `patch-influx-flow.cjs`, `flow.json`, `INFLUX.md`, `check-influx-function-node.cjs` angepasst.
+
+## Step 91 - influx-saved-places-and-routes
+
+Done
+`saved_place` und `saved_route` werden bei aktivem Influx wie `gps_point` geschrieben (POST speichern, zweiter Ausgang auf denselben HTTP-Write-Node); GET-Listen nutzen Flux plus Merge mit Globals; Lösch-APIs und Reset/Device-Delete erweitern die Influx-Delete-Predicates. Doku in `INFLUX.md`; wiederholbar über `scripts/patch-saved-places-routes-influx.cjs` (Line-Protocol-Hilfen aus `Tracking-Logik` übernommen).
+
+## Step 93 - per-device-last-position-and-api
+
+Done
+`lastPositionByDevice` wird in **Tracking-Logik** bei jedem Punkt mitgeschrieben; **GET /api/last-position** akzeptiert optional `deviceKey` oder `user`+`device` und liefert `devices[…]` bzw. den gespeicherten letzten Stand nur für dieses Gerät (sonst weiterhin globaler Fallback). Geräte-Reset und vollständiger Reset räumen `lastPositionByDevice` mit auf; **Maplogik** ruft die API mit gewähltem Gerät auf (`buildLastPositionApiUrl`). Wiederholbar über `scripts/patch-per-device-lastpos.cjs`; **Tracking-logik**-Datei im Repo synchron gehalten.
+
+## Step 94 - sync-maplogik-into-flow-template
+
+Done
+Die Karte kommt aus dem **template**-Node „Logik“ in `flow.json`, nicht automatisch aus der Datei `Maplogik`. Skript `scripts/sync-map-template-from-maplogik.cjs` kopiert `Maplogik` in Node `b0dbf8a4e58a40b2`, damit Deploy und Editor der ausgelieferten Karte der Quelldatei entsprechen.
+
+## Step 95 - saved-places-load-order-and-device-switch
+
+Done
+Beim ersten Seitenladen liefen `loadSavedPlaces`/`loadSavedRoutes` vor `loadTracking`, sodass ohne `deviceKey` auf `__default__`/Legacy zugegriffen wurde; Startreihenfolge: zuerst `loadTracking` (setzt Gerät via Snapshot), dann Orte/Routen. Beim Laden werden gespeicherte Marker- und Routen-Layer geleert; nach Gerätewechsel werden Orte und Routen für das neue Gerät neu geladen. `flow.json`-Template per Sync-Skript aktualisiert.
+
+## Step 96 - reset-tracking-counters-and-route-line
+
+Done
+**Reset (Gerät):** Zähler sofort auf 0, Tracking-Route aus, Start-Marker-Leck in `renderLatestTrackingRouteLineFromHistory` behoben (kein Marker ohne Linie). **Server-Reset** (`resetAllData`) leert zusätzlich `recentSpeedsByKey` pro Gerät bzw. global. Tooltips zu Empfangen/Route; `scripts/patch-reset-recent-speeds.cjs` und Map-Template-Sync.
+
+## Step 98 - influx-delete-stop-time-max
+
+Done
+InfluxDB lehnt `stop` in der Delete-API ab, wenn er nach `2262-04-11T23:47:16.854775806Z` liegt; im Flow stand `...807Z`. Alle Vorkommen auf `...806Z` angepasst (`flow.json`, `scripts/patch-influx-flow.cjs`).
+
+## Step 99 - reset-tracking-keeps-saved-places-routes
+
+Done
+`resetAllData` löscht nur noch `gps_point` in Influx und räumt Tracking-Globals auf; `saved_place`/`saved_route` und die Maps `savedPlaces*`/`savedRoutes*` bleiben unangetastet (Löschen nur über bestehende Lösch-APIs bzw. manuelle UI).
+Bestätigungstexte in `Maplogik` angepasst; Template per `sync-map-template-from-maplogik.cjs` in `flow.json` übernommen.
+
+## Step 100 - delete-places-routes-merge-influx-before-delete
+
+Done
+`DELETE` für gespeicherte Orte/Routen lädt bei aktivem Influx vor dem Entfernen dieselbe Flux+Merge-Liste wie `GET`, damit nach Node-RED-Neustart (leere RAM-Listen) keine 404 „Keine passenden …“ mehr auftreten. `patch-saved-places-routes-influx.cjs`: `patchResetAllInflux` ist No-Op, damit erneute Läufe Tracking-Reset nicht wieder mit `saved_place`-Deletes befüllen. `INFLUX.md` angepasst.
+
+## Step 101 - influx-csv-parser-routes-dedupe
+
+Done
+`splitCsvLine` in allen betroffenen Function-Nodes auf RFC-4180-ähnliches Parsing umgestellt (Anführungszeichen + `""`, Kommas nur außerhalb von Zellen), damit `points_json` aus der Influx-CSV nicht an Kommas zerlegt wird. `dedupeInfluxSavedRoutesFromRows` in `listSavedRoutes` und Route-Merge-vor-Delete: pro `route_id` die Zeile mit den meisten Punkten behalten. `scripts/patch-influx-flow.cjs`, `scripts/apply-influx-splitCsvLine-rfc4180.cjs`, `scripts/patch-saved-places-routes-influx.cjs`, `flow.json`.
+
+## Step 102 - save-route-post-body-points-from-client
+
+Done
+`POST /api/routes` las nur `historyByDevice`/`history` in Globals; bei Historie aus Influx (leere RAM-Liste) schlug das Speichern mit 400 fehl. Karte sendet jetzt `points` aus `GET`-Historie mit; Server nutzt `payload.points` (validiert) mit Fallback auf RAM. `Maplogik` + Sync-Template; `patch-saved-places-routes-influx.cjs` / `flow.json`.
+
+## Step 103 - influx-device-list-persist-and-delete-registry
+
+Done
+**Bisher:** `GET /api/devices` (`apiForNewDevice`) lieferte nur RAM-`devices` mit `__trackingSessionEpoch` — nach Neustart leer bis MQTT. **Jetzt (Influx aktiv):** letzte `gps_point` pro `device_id`, distinct `device_id` aus `saved_place`/`saved_route`, Merge mit Live-Globals und `lastPositionByDevice` (ohne Session-Epoch-Filter). **Tracking-Logik** schreibt bei jedem gültigen GPS-Fix zusätzlich `device_registry` (gleicher Write wie GPS, ggf. nur Registry-Zeile). **`DELETE /api/devices/...`** löscht auch `device_registry`. Skript `scripts/patch-device-registry-influx.cjs`; `Tracking-logik` und `INFLUX.md` angepasst.
+
+## Step 104 - influx-devices-list-flux-saved-ids-no-distinct
+
+Done
+Der Flux für Zusatz-Geräte-IDs aus `saved_place`/`saved_route` nutzte `keep |> distinct(column: "device_id")` und löste auf dem Ziel-Influx HTTP 400 (runtime error). Ersetzt durch zwei Abfragen: `saved_place` mit `_field == "lat"` und `saved_route` mit `_field == "point_count"`, jeweils `group(device_id) |> last()`, Merge der IDs in `apiForNewDevice`. Inject **„Nach Deploy: Geräteliste leeren“** und Function **`clearDeviceGlobalsDelayed`** werden aus `flow.json` entfernt (`removeDeployClearDeviceListChain` im Patch-Skript), damit persistierte Listen nach Deploy nicht geleert werden. **Maplogik:** Verbindungs-Chip zeigt bei bekannter letzter Position aber ohne frische MQTT-Zeit **„Offline“** (grau) statt **„Getrennt“** (rot). `scripts/patch-device-registry-influx.cjs`, `flow.json`, `sync-map-template-from-maplogik.cjs`, `INFLUX.md`.
+
+## Step 105 - influx-devices-gps-flux-last-after-pivot
+
+Done
+Nach `pivot(..., valueColumn: "_value")` existiert keine `_value`-Spalte mehr; `|> last()` verlangt standardmäßig `_value` und erzeugte HTTP 400 (`last: no column "_value" exists`). In `buildFluxLastGpsPerDevice` wird `|> last(column: "lat")` verwendet. Patch-Skript-Idempotenz verlangt jetzt dieses Muster, damit erneute Läufe den Flow aktualisieren. `scripts/patch-device-registry-influx.cjs`, `flow.json`.
+
+## Step 108 - devices-list-require-fresh-mqtt
+
+Done
+`GET /api/devices` bei Influx: Zusätzlicher Filter **frisches MQTT** (`devices.receivedAt` < 10 s, Konstante `DEVICE_LIST_MQTT_FRESH_MAX_AGE_MS`), damit viele alte `device_registry`-/`user/device`-Identitäten ohne aktive Verbindung nicht mehr in der UI-Liste stehen. `keySet` = Registry-IDs ∪ Keys mit frischem MQTT. `scripts/patch-device-registry-influx.cjs`, `flow.json`, `INFLUX.md`. *(Geräteliste: Filter später wieder entfernt, Step 110.)*
+
+## Step 111 - deploy-session-epoch-and-receivedat-clamp
+
+Done
+Nach Deploy wirkte „Verbunden“, weil u. a. **`mapInfluxRowToPoint`** bei unparsebarer `_time` **`Date.now()`** als `receivedAt` setzte und RAM-`receivedAt` aus vorheriger Session jung blieb. **Tracking-Logik** setzt beim Node-(Re)Start **`__trackingSessionEpoch`** (node-`context` einmalig). **`apiForNewDevice`** clamped `receivedAt` auf **0**, wenn **< Epoche**. Influx-Zeilen-Fallback ohne gültiges `_time`: **`timestamp`/`receivedAt` = 0**. `scripts/patch-device-registry-influx.cjs` (`patchMapInfluxRowToPointTimestampFallback`), `scripts/patch-influx-flow.cjs`, `Tracking-logik`, `scripts/sync-tracking-logik-to-flow.cjs`, `flow.json`, `INFLUX.md`.
+
+## Step 112 - connection-status-only-receivedat-api-epoch-bootstrap
+
+Done
+**Verbunden** ohne frischen Server-Empfang: Maplogik nutzt für `evaluateConnectionStatus` und `tryClearForcedDisconnectAfterFreshPoint` nur noch **`receivedAt`** (kein `|| timestamp`). **`GET /api/devices`**: Falls **`__trackingSessionEpoch`** noch fehlt, setzt die API sie synchron beim Aufruf (**`bootstrapEpoch`**), damit der Clamp auch ohne vorheriges MQTT nach Deploy greift. `scripts/patch-device-registry-influx.cjs`, `Maplogik`, Sync-Template, `INFLUX.md`.
+
+## Step 113 - last-position-api-session-clamp-delete-recent-speeds
+
+Done
+**Letzte Position (`lastPosition`):** gleiche **`__trackingSessionEpoch`**-Bootstrap und **`receivedAt`-Clamp** wie bei `GET /api/devices`, damit `loadTracking` nicht über `/api/last-position` noch „frische“ RAM-Zeiten liefert. **`deleteDeviceData`:** löscht zusätzlich **`recentSpeedsByKey[key]`**. `scripts/patch-device-registry-influx.cjs`, `flow.json`, `INFLUX.md`.
+
+## Step 109 - tracking-receivedat-only-on-gps-fix-map-hysteresis-reset
+
+Done
+**Tracking-Logik** / `flow.json`: Bei `!gpsFixOk` bleibt `receivedAt` am vorherigen Wert (bzw. lastGood / `timestamp` / 0). **Maplogik**: `loadTracking` setzt `connectionHysteresisConnectedByKey` zu Beginn zurück. `Tracking-logik`, `scripts/sync-tracking-logik-to-flow.cjs`, `Maplogik`, Sync-Template, `INFLUX.md`.
+
+## Step 110 - devices-list-remove-mqtt-fresh-filter-offline-placeholder
+
+Done
+`GET /api/devices`: Filter **`DEVICE_LIST_MQTT_FRESH_MAX_AGE_MS` / `deviceHasFreshMqtt`** entfernt — alle Registry-Geräte bleiben in der Liste (online/offline). Ohne gültige Koordinaten: **Platzhalter** mit `lat`/`lon` `null`. `scripts/patch-device-registry-influx.cjs`, `flow.json`, `INFLUX.md`.
+
+## Step 107 - devices-list-influx-registry-allowlist-only
+
+Done
+`GET /api/devices` bei aktivem Influx: Geräte-IDs nur noch aus **`device_registry`** (letzte Zeile pro `device_id`); Positionen aus **`gps_point`** und RAM nur für diese IDs. Kein Aufzählen aller historischen GPS-`device_id`s und kein Merge aus `saved_place`/`saved_route` für die Liste. Nach **`DELETE /api/devices/...`** (inkl. Registry-Löschen) erscheinen gelöschte Geräte nicht erneut durch alte `gps_point`-Daten. `scripts/patch-device-registry-influx.cjs`, `flow.json`, `INFLUX.md`.
+
+## Step 114 - navigation-route-reroute-and-styled-trimming
+
+Done
+`Maplogik`: aktive Navigationsroute wird jetzt als zwei gestapelte `L.polyline`-Layer gerendert (Casing `#111111`/Weight 12 + Core `#6f42c1`/Weight 8 mit `lineCap`/`lineJoin: 'round'`), damit die Linie straßenähnlich breit mit dünnem schwarzen Rand erscheint; `applyRouteOnMap` speichert Coords, Kumulativ-Längen, Ziel/Modus/Waypoints-Snapshot, `applyRouteWithKnownStartPosition` reicht Transport-Modus und Waypoints sauber durch. Neue Helper `projectLatLngOntoNavigationRoute`/`setNavigationRouteRemainingFromProjection`/`updateNavigationRouteRemainingForLatLng` trimmen die Linie im Compact-Modus pro Marker-Animationsframe sowie pro Poll-Tick und Daten-Refresh in `loadTracking`, sodass der gefahrene Teil verschwindet ohne Versatz zum animierten Standortmarker. Wrong-Way-Reroute (`isUserDrivingWrongWay` + `recomputeActiveNavigationRouteFrom`) prüft Heading vs. Routenrichtung (Schwelle 120°, ≥3 km/h, 2 bestätigende Ticks, 12 s Cooldown) und berechnet die Route via `fetchRouteGeometry` mit Ziel und nur den noch nicht passierten Waypoints (`filterRemainingWaypointsByArc`) neu. `clearRouteVisualization` und die übrigen Routen-Cleanup-Pfade nutzen `resetNavigationRouteOverlayState`. Flow-Template über `node scripts/sync-map-template-from-maplogik.cjs` aktualisiert; `flow.json` parst sauber.

@@ -1,0 +1,39 @@
+{
+  "appId": "de.tracking.mobile",
+  "appName": "GPS Tracking",
+  "webDir": "www",
+  "server": {
+    "url": "https://raspberrypi.tail47e91f.ts.net/map",
+    "androidScheme": "https",
+    "allowNavigation": [
+      "raspberrypi.tail47e91f.ts.net",
+      "*.tailscale.net",
+      "*.ts.net",
+      "api.maptiler.com",
+      "unpkg.com",
+      "nominatim.openstreetmap.org",
+      "photon.komoot.io",
+      "routing.openstreetmap.de",
+      "router.project-osrm.org",
+      "a.basemaps.cartocdn.com",
+      "tile.openstreetmap.org",
+      "raw.githubusercontent.com"
+    ]
+  },
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "LIGHT",
+      "backgroundColor": "#00000000"
+    },
+    "Geolocation": {
+      "permissions": [
+        "location",
+        "coarseLocation"
+      ]
+    },
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

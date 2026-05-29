@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GPS Tracking</string>
+    <string name="title_activity_main">GPS Tracking</string>
+    <string name="package_name">de.tracking.mobile</string>
+    <string name="custom_url_scheme">de.tracking.mobile</string>
+</resources>

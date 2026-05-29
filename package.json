@@ -1,0 +1,14 @@
+{
+  "name": "node-red-projekt-tools",
+  "private": true,
+  "description": "Hilfsskripte (z. B. MQTT-Demo) für das Node-RED-Projekt",
+  "scripts": {
+    "mobile:flow": "node scripts/build-mobile-app-flow.js",
+    "mobile:apk-copy": "node scripts/copy-android-apk.js",
+    "sync:map": "node sync-flow.js",
+    "verify:coldstart": "node scripts/verify-map-coldstart-build.cjs"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.3"
+  }
+}

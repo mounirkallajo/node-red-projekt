@@ -1,1 +1,6 @@
 .cursor/
+node_modules/
+mobile-capacitor/node_modules/
+mobile-capacitor/www/vendor/
+mobile-capacitor/android/local.properties
+mobile-releases/*.apk
