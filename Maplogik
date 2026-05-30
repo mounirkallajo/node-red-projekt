@@ -714,14 +714,27 @@
     .route-label-marker-b {
       background: #f39c12;
     }
-    .device-facing-marker-layer { background: none; border: none; }
+    /* preserve-3d laesst die angehobene Deckflaeche bei geneigter Kamera als
+       Dicke (Tablette) erscheinen; von oben deckt sie die Basis -> nur Kreis.
+       Kein 'filter' hier, da filter den 3D-Kontext flachlegen wuerde. */
+    .device-facing-marker-layer { background: none; border: none; transform-style: preserve-3d; }
     .device-facing-marker {
+      position: relative;
       line-height: 0;
       pointer-events: none;
-      filter: drop-shadow(0 3px 7px rgba(0,0,0,0.32));
+      width: 56px;
+      height: 56px;
+      transform-style: preserve-3d;
+    }
+    .device-facing-marker-base,
+    .device-facing-marker-top {
+      position: absolute;
+      left: 0;
+      top: 0;
       width: 56px;
       height: 56px;
     }
+    .device-facing-marker-top { transform: translateZ(8px); }
     .device-facing-marker svg { display: block; }
     .device-facing-marker-ring,
     .device-facing-marker-pulse-ring {
@@ -2047,6 +2060,8 @@
             minZoom: this.options.minZoom,
             maxZoom: this.options.maxZoom,
             bearing: numberOr(this.options.bearing, 0),
+            pitch: numberOr(this.options.pitch, 0),
+            maxPitch: numberOr(this.options.maxPitch, 70),
             dragRotate: false,
             pitchWithRotate: false,
             touchZoomRotate: true,
@@ -2098,6 +2113,8 @@
         getMaxZoom() { return this._native.getMaxZoom(); }
         getBearing() { return -numberOr(this._native.getBearing(), 0); }
         setBearing(bearing) { this._native.jumpTo({ bearing: -numberOr(bearing, 0) }); return this; }
+        getPitch() { return numberOr(this._native.getPitch(), 0); }
+        setPitch(pitch) { this._native.jumpTo({ pitch: Math.max(0, Math.min(70, numberOr(pitch, 0))) }); return this; }
         getSize() { const c = this.getContainer(); return point(c.clientWidth || 0, c.clientHeight || 0); }
         getZoomScale(toZoom, fromZoom) { return Math.pow(2, numberOr(toZoom, 0) - numberOr(fromZoom, 0)); }
         project(value, zoom) { return projectAtZoom(value, zoom === undefined ? this.getZoom() : zoom); }
@@ -2118,6 +2135,7 @@
           if (!lngLat) return this;
           const camera = { center: lngLat };
           if (Number.isFinite(Number(zoom))) camera.zoom = Number(zoom);
+          if (options && Number.isFinite(Number(options.pitch))) camera.pitch = Number(options.pitch);
           const duration = options && options.animate ? numberOr(options.duration, 0.8) * 1000 : 0;
           this._flagAnimation(duration);
           if (duration) this._native.easeTo(Object.assign(camera, { duration: duration, essential: true }));
@@ -2132,6 +2150,7 @@
           const camera = { center: lngLat, duration: duration, essential: true };
           if (Number.isFinite(Number(zoom))) camera.zoom = Number(zoom);
           if (options && Number.isFinite(Number(options.bearing))) camera.bearing = -Number(options.bearing);
+          if (options && Number.isFinite(Number(options.pitch))) camera.pitch = Number(options.pitch);
           this._flagAnimation(duration);
           this._native.flyTo(camera);
           return this;
@@ -2391,6 +2410,8 @@
     const LOCAL_SAVED_ROUTES_STORAGE_KEY = 'mapLocalSavedRoutesByDevice';
     const NAV_ROUTE_CACHE_STORAGE_KEY = 'mapNavigationRouteCache';
     const LOCATE_BUTTON_ACTIVE_MS = 400;
+    const LOCATE_FOLLOW_TOGGLE_MIN_GAP_MS = 900;
+    const MISMATCH_SUPPRESS_AFTER_START_MS = 20000;
     const LOCATION_REQUEST_POLL_INTERVAL_MS = 100;
     const LOCATION_REQUEST_WAIT_MAX_MS = 20000;
     const LOCATION_REQUEST_BUTTON_MAX_WAIT_MS = 7000;
@@ -2398,6 +2419,8 @@
     const AUTO_FOLLOW_RESUME_AFTER_IDLE_MS_SEARCH_OPEN = 60000;
     const AUTO_FOLLOW_MIN_PAN_DISTANCE_METERS = 3;
     const AUTO_FOLLOW_PAN_DURATION_SECONDS = 0.9;
+    // Leichte Kameraneigung fuer die "Sicht nach vorne" beim Zentrieren/Navigieren.
+    const MAP_DRIVE_VIEW_PITCH_DEG = 52;
     const LIVE_TRACKING_WS_PATH = '/ws/live-tracking';
     const LIVE_TRACKING_RECONNECT_INITIAL_MS = 1500;
     const LIVE_TRACKING_RECONNECT_MAX_MS = 10000;
@@ -2546,6 +2569,16 @@
       }
     }
 
+    function isMapRotationAutoEnabled() {
+      // Laufzeit-Auswertung der Einstellung "Kartendrehung automatisch".
+      // Haken aus = keine Drehung (nur Zoom/Folgen, Karte bleibt Nord-oben).
+      try {
+        return localStorage.getItem('gpsMapRotationAuto') !== '0';
+      } catch (e) {
+        return true;
+      }
+    }
+
     function loadLastHeadingsFromStorage() {
       const resultByKey = {};
       try {
@@ -2583,6 +2616,7 @@
       startMarker: null,
       trackLine: null,
       latestTrackingRouteLineByKey: {},
+      latestTrackingRouteConnectorByKey: {},
       latestTrackingStartMarkerByKey: {},
       showLatestTrackingRouteByKey: {},
       routeLine: null,
@@ -2643,6 +2677,7 @@
       deviceSwitchViewTimerId: null,
       autoFollowEnabled: false,
       autoFollowResumeTimer: null,
+      autoFollowResumeArmed: false,
       lastKnownCurrentLatLng: null,
       lastKnownLatLngByDevice: {},
       positionFusionByDeviceKey: {},
@@ -2711,6 +2746,7 @@
       navigationNextEventDistanceMeters: null,
       navigationLatestSpeedKmh: null,
       navigationAdaptiveZoomInProgress: false,
+      locateZoomInProgress: false,
       navigationAdaptiveZoomTimerId: null,
       navigationAdaptiveZoomArmed: false,
       navigationAutoViewEnabled: false,
@@ -2919,14 +2955,6 @@
       try {
         window.localStorage.setItem(storageKey, JSON.stringify(value || {}));
       } catch (error) {}
-    }
-
-    function markPendingServerReset(deviceKey) {
-      const key = String(deviceKey || '').trim();
-      if (!key) return;
-      const pending = readLocalJsonMap(LOCAL_PENDING_RESET_STORAGE_KEY);
-      pending[key] = Date.now();
-      writeLocalJsonMap(LOCAL_PENDING_RESET_STORAGE_KEY, pending);
     }
 
     function clearPendingServerReset(deviceKey) {
@@ -3283,9 +3311,9 @@
 
     function effectiveTrackingActiveFromStatus(deviceKey, trackingStatusData) {
       const localState = getLocalTrackingState(deviceKey);
-      if (isNativePhoneDeviceKey(deviceKey) && localState &&
-        (localState.syncPending || !browserSeemsOnline())) {
-        return !!localState.active;
+      // Handy: lokale Tracking-Logik ist die alleinige Wahrheit (entkoppelt vom Server).
+      if (isNativeAppContext() && isNativePhoneDeviceKey(deviceKey)) {
+        return localState ? !!localState.active : false;
       }
       if (trackingStatusData && typeof trackingStatusData.active !== 'undefined') {
         return !!trackingStatusData.active;
@@ -3597,6 +3625,8 @@
       }
       if (state.autoFollowEnabled && !state.userHasInteractedWithMap) {
         followCurrentPositionOnMap(latLng, false);
+      } else {
+        rescheduleAutoFollowResumeIfMapFollowPaused();
       }
     }
 
@@ -3667,6 +3697,7 @@
       if (!state.map) return;
       const latLngs = allDeviceLatLngsForView();
       if (latLngs.length === 0) return;
+      resetMapPitchFlat();
       if (latLngs.length === 1) {
         state.map.flyTo(latLngs[0], Math.min(10, state.map.getMaxZoom()), { duration: durationSec || 1.4, easeLinearity: 0.12 });
         return;
@@ -4341,7 +4372,7 @@
       }
       const zoom = typeof targetZoom === 'number' && Number.isFinite(targetZoom) ? targetZoom : state.map.getZoom();
       const centerLatLng = resolveMapCenterForDockedLatLng(markerLatLng, zoom);
-      state.map.setView(centerLatLng, zoom, { animate: false });
+      state.map.setView(centerLatLng, zoom, { animate: false, pitch: MAP_DRIVE_VIEW_PITCH_DEG });
     }
 
     function resolveSmoothMarkerMoveDurationMs(pointTimestamp, fallbackDurationMs, motionState, updateTimeKey) {
@@ -4497,13 +4528,14 @@
             state.map.flyTo(finalCenterLatLng, targetZoom, {
               duration: durationMs / 1000,
               easeLinearity: 0.04,
-              noMoveStart: true
+              noMoveStart: true,
+              pitch: MAP_DRIVE_VIEW_PITCH_DEG
             });
             if (typeof armAdaptiveZoomMoveEnd === 'function') {
               armAdaptiveZoomMoveEnd();
             }
           } else {
-            state.map.setView(finalCenterLatLng, targetZoom, { animate: true });
+            state.map.setView(finalCenterLatLng, targetZoom, { animate: true, pitch: MAP_DRIVE_VIEW_PITCH_DEG });
             if (typeof armAdaptiveZoomMoveEnd === 'function') {
               armAdaptiveZoomMoveEnd();
             }
@@ -4564,12 +4596,51 @@
       });
     }
 
+    function resetMapPitchFlat(animate) {
+      // Kamera wieder von oben (keine Neigung). Mit animate=true kippt sie
+      // sanft zurueck (Mitte bleibt unveraendert), sonst sofort.
+      if (!state.map || typeof state.map.setPitch !== 'function') {
+        return;
+      }
+      if (typeof state.map.getPitch === 'function' && state.map.getPitch() < 0.5) {
+        return;
+      }
+      if (animate && typeof state.map.getCenter === 'function' && typeof state.map.setView === 'function') {
+        state.map.setView(state.map.getCenter(), undefined, { animate: true, duration: 0.6, pitch: 0 });
+        return;
+      }
+      state.map.setPitch(0);
+    }
+
     function scheduleAutoFollowResume() {
       clearAutoFollowResumeTimer();
+      // Nur fortsetzen, wenn der Nutzer das Folgen aktiviert hat (Ortung/Tracking)
+      // und wir nicht im "Alle Geraete"-Modus sind.
+      if (!state.autoFollowResumeArmed || state.showAllDevicesOnMap) {
+        return;
+      }
+      state.autoFollowResumeTimer = setTimeout(function () {
+        state.autoFollowResumeTimer = null;
+        if (!state.autoFollowResumeArmed || state.showAllDevicesOnMap) {
+          return;
+        }
+        state.autoFollowEnabled = true;
+        state.userHasInteractedWithMap = false;
+        enableHeadingUpBearingControl();
+        var latLng = state.lastKnownCurrentLatLng;
+        if (latLng && latLng.length >= 2) {
+          followCurrentPositionOnMap(latLng, true);
+          var eff = effectiveHeadingForDeviceDisplay(getSelectedDeviceKey(), state.latestHeadingDegrees);
+          if (eff !== null) syncMapBearingFromHeading(eff);
+        }
+      }, getAutoFollowResumeDelayMs());
     }
 
     function rescheduleAutoFollowResumeIfMapFollowPaused() {
-      clearAutoFollowResumeTimer();
+      if (state.autoFollowResumeArmed && !state.showAllDevicesOnMap &&
+        !state.autoFollowEnabled && !state.autoFollowResumeTimer) {
+        scheduleAutoFollowResume();
+      }
     }
 
     function disableAutoFollowTemporarilyByUserInteraction() {
@@ -4578,6 +4649,8 @@
       }
       clearAutoFollowResumeTimer();
       disableHeadingUpBearingByUserInteraction();
+      // Nach kurzer Inaktivitaet wieder folgen, falls Ortung/Tracking aktiv ist.
+      scheduleAutoFollowResume();
     }
 
     function connectionStatusKeyForDevice(deviceKey) {
@@ -5046,13 +5119,15 @@
       var currentLatLng = [activePosition.lat, activePosition.lon];
       var headingDeviceKey = selectedDeviceKey || activeDeviceKey || '';
       processNavigationRouteLiveUpdate(activePosition);
-      updateHeadingVisualization(activePosition, currentLatLng);
-      var effLive = effectiveHeadingForDeviceDisplay(headingDeviceKey, state.latestHeadingDegrees);
 
+      // Den currentMarker zuerst sicherstellen und DANN das Heading aktualisieren.
+      // Sonst legt updateHeadingVisualization einen separaten Heading-Marker an,
+      // weil currentMarker noch fehlt -> kurzzeitig zwei Standort-Marker.
       if (!state.showAllDevicesOnMap) {
         if (!state.currentMarker) {
+          var effInit = effectiveHeadingForDeviceDisplay(headingDeviceKey, normalizeHeadingDegrees(activePosition.heading));
           state.currentMarker = L.marker(currentLatLng, {
-            icon: createCurrentPositionIcon(selectedDeviceKey || '', effLive),
+            icon: createCurrentPositionIcon(selectedDeviceKey || '', effInit),
             zIndexOffset: 2000,
             rotateWithView: facingMarkerRotateWithViewOption(),
             rotation: 0
@@ -5066,6 +5141,7 @@
           );
         }
       }
+      updateHeadingVisualization(activePosition, currentLatLng);
       state.lastKnownCurrentLatLng = [activePosition.lat, activePosition.lon];
       if (selectedDeviceKey && coordinatesArePlausibleForMap(activePosition.lat, activePosition.lon)) {
         state.lastKnownLatLngByDevice[selectedDeviceKey] = [activePosition.lat, activePosition.lon];
@@ -5207,11 +5283,14 @@
           updateSyncPendingCounter(0);
         }
         if (nativeKey) {
-          setLocalTrackingState(nativeKey, false, true);
+          setLocalTrackingState(nativeKey, false, false);
           delete state.showLatestTrackingRouteByKey[nativeKey];
           removeLatestTrackingRouteLine(nativeKey);
           updateTrackingRouteButtonLabel();
         }
+      });
+      window.addEventListener('capacitor-tracking-command', function (event) {
+        handleRemoteTrackingCommand(event && event.detail);
       });
       window.addEventListener('capacitor-heading-filter-debug', function (event) {
         applyNativeFilteredHeadingFromBridge(event && event.detail);
@@ -5633,54 +5712,37 @@
     }
 
     async function flushPendingServerReset(deviceKey) {
+      // Das Handy resettet den Server nicht mehr ueber HTTPS. Eventuell aus
+      // aelteren Versionen verbliebene Pending-Markierungen werden nur lokal
+      // aufgeraeumt (kein /api/reset), damit kein versteckter HTTPS-Reset
+      // ausgeloest wird und die Verlaufsanzeige nicht haengen bleibt.
       const key = String(deviceKey || '').trim();
-      if (!key || !hasPendingServerReset(key) || !browserSeemsOnline()) return false;
-      await fetchJson('/api/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceKey: key })
-      });
-      clearPendingServerReset(key);
-      const localState = getLocalTrackingState(key);
-      if (localState) {
-        localState.active = false;
-        localState.syncPending = false;
-        localState.updatedAt = Date.now();
-        state.localTrackingStateByDeviceKey[key] = localState;
-        persistLocalTrackingStateMap();
-      }
-      return true;
+      if (!key) return false;
+      if (hasPendingServerReset(key)) clearPendingServerReset(key);
+      return false;
     }
 
     async function resetTrackingData(optionalDeviceKey) {
+      const nativeResetKey = optionalDeviceKey && isNativeAppContext() && isNativePhoneDeviceKey(optionalDeviceKey)
+        ? optionalDeviceKey
+        : (!optionalDeviceKey && isNativeAppContext() ? getNativePhoneDeviceKey() : '');
+      // Handy resettet ausschliesslich lokal und schickt KEINE Server-Anfrage
+      // (kein HTTPS, auch kein nachgelagerter Reset). Der Server kann das Handy
+      // weiterhin per MQTT-Command (tracking_reset) zuruecksetzen; Live-Punkte
+      // laufen unveraendert weiter.
+      if (nativeResetKey) {
+        resetNativeLocalTrackingData(nativeResetKey);
+        return { ok: true, data: { localOnly: true } };
+      }
       const requestBody = {};
       if (optionalDeviceKey) {
         requestBody.deviceKey = optionalDeviceKey;
       }
-      const nativeResetKey = optionalDeviceKey && isNativeAppContext() && isNativePhoneDeviceKey(optionalDeviceKey)
-        ? optionalDeviceKey
-        : (!optionalDeviceKey && isNativeAppContext() ? getNativePhoneDeviceKey() : '');
-      if (nativeResetKey) {
-        resetNativeLocalTrackingData(nativeResetKey);
-        markPendingServerReset(nativeResetKey);
-      }
-      try {
-        const resetResponse = await fetchJson('/api/reset', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
-        });
-        if (nativeResetKey) {
-          clearPendingServerReset(nativeResetKey);
-          setLocalTrackingState(nativeResetKey, false, false);
-        }
-        return resetResponse;
-      } catch (error) {
-        if (nativeResetKey) {
-          return { ok: true, data: { localOnly: true } };
-        }
-        throw error;
-      }
+      return await fetchJson('/api/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
     }
 
     async function fetchTrackingStatus(deviceKey) {
@@ -5712,13 +5774,16 @@
     }
 
     function updateTrackingStatusChip() {
-      const localState = getLocalTrackingState(getSelectedDeviceKey());
-      if (localState && localState.syncPending) {
-        setStatusChip('trackingStatusChip', localState.active ? 'Lokal aktiv' : 'Lokal gestoppt', localState.active ? 'green' : 'gray');
+      const selectedKey = getSelectedDeviceKey();
+      // Handy: zeigt den lokalen Zustand (Bridge ist die Wahrheit).
+      if (isNativeAppContext() && isNativePhoneDeviceKey(selectedKey)) {
+        setStatusChip('trackingStatusChip', state.trackingEnabled ? 'Lokal aktiv' : 'Lokal inaktiv', state.trackingEnabled ? 'green' : 'gray');
         return;
       }
+      // Web/Server: zeigt den Server-Zustand und ggf. den Mismatch zum Handy.
       if (state.trackingEnabled) {
-        setStatusChip('trackingStatusChip', 'Aktiv', 'green');
+        const mismatch = state.serverActiveLocalStoppedByKey && state.serverActiveLocalStoppedByKey[selectedKey];
+        setStatusChip('trackingStatusChip', mismatch ? 'Aktiv · Handy gestoppt' : 'Aktiv', mismatch ? 'yellow' : 'green');
       } else {
         setStatusChip('trackingStatusChip', 'Inaktiv', 'gray');
       }
@@ -8620,21 +8685,24 @@
     }
 
     function isHeadingUpBearingControlActive() {
-      return !!state.headingUpBearingEnabled && !state.showAllDevicesOnMap;
+      return !!state.headingUpBearingEnabled && !state.showAllDevicesOnMap && isMapRotationAutoEnabled();
     }
 
     function facingMarkerRotateWithViewOption() {
-      return false;
-    }
-
-    function facingIconScreenHeading(normalizedHeading) {
-      if (normalizedHeading === null || isHeadingUpBearingControlActive()) {
-        return normalizedHeading;
-      }
-      return wrapHeadingDegreesForMap(normalizedHeading + getCurrentMapBearingDegrees());
+      // true => der Marker liegt in der Kartenebene (pitch/rotation 'map') und
+      // kippt mit der Kamera mit. Zusammen mit der angehobenen Deckflaeche
+      // (siehe CSS translateZ) wirkt er beim Neigen wie eine flache 3D-Tablette;
+      // von oben sieht man nur den Kreis. Der Pfeil dreht geografisch und kann
+      // dadurch nie die Fahrtrichtung verlieren.
+      return true;
     }
 
     function enableHeadingUpBearingControl() {
+      // Nur freigeben, wenn die automatische Kartendrehung eingeschaltet ist.
+      if (!isMapRotationAutoEnabled()) {
+        state.headingUpBearingEnabled = false;
+        return;
+      }
       state.headingUpBearingEnabled = true;
     }
 
@@ -8745,6 +8813,11 @@
       if (state.navigationAdaptiveZoomInProgress) {
         return;
       }
+      // Waehrend des Standort-Zooms keine Drehung, damit der Zoom nicht
+      // durch die Bearing-Animation unterbrochen wird (Zoom zuerst, dann drehen).
+      if (state.locateZoomInProgress) {
+        return;
+      }
       if (!isHeadingUpBearingControlActive()) {
         return;
       }
@@ -8772,19 +8845,27 @@
     }
 
     function buildFacingIconSvg(normalizedHeading, accentHex) {
-      const useFixedScreenUpArrow = normalizedHeading !== null && isHeadingUpBearingControlActive();
-      const screenHeading = facingIconScreenHeading(normalizedHeading);
+      // Kreis-Marker als flache 3D-Tablette: eine farbige Basis (Z=0) und eine
+      // angehobene Deckflaeche (CSS translateZ). Da der Marker in der Kartenebene
+      // liegt, kippt er mit der Kamera -> beim Neigen wird die farbige Dicke
+      // sichtbar, von oben deckt die Deckflaeche die Basis und man sieht nur den
+      // Kreis. Der Pfeil zeigt geografische Fahrtrichtung (0 = Norden).
       const arrow = normalizedHeading === null ? '' : (
-        useFixedScreenUpArrow
-          ? '<g class="device-facing-arrow"><path d="M28 8.5L38 34L28 26.5L18 34Z" fill="#111"/></g>'
-          : '<g class="device-facing-arrow" style="transform-origin:28px 28px;transform-box:view-box;transform:rotate(' + screenHeading + 'deg)">' +
-            '<path d="M28 8.5L38 34L28 26.5L18 34Z" fill="#111"/></g>'
+        '<g class="device-facing-arrow" style="transform-origin:28px 28px;transform-box:view-box;transform:rotate(' + normalizedHeading + 'deg)">' +
+          '<path d="M28 8.5L38 34L28 26.5L18 34Z" fill="#111"/></g>'
       );
-      return '<div class="device-facing-marker"><svg viewBox="0 0 56 56" width="56" height="56" aria-hidden="true">' +
-        '<circle class="device-facing-marker-pulse-ring" cx="28" cy="28" r="21" fill="none" stroke="' + accentHex + '" stroke-width="3.2"/>' +
-        '<circle class="device-facing-marker-ring" cx="28" cy="28" r="21" fill="#fff" stroke="' + accentHex + '" stroke-width="3.6"/>' +
-        '<circle cx="28" cy="28" r="15.8" fill="#fff" stroke="rgba(17,17,17,0.28)" stroke-width="1.2"/>' +
-        arrow + '</svg></div>';
+      return '<div class="device-facing-marker">' +
+        '<div class="device-facing-marker-base"><svg viewBox="0 0 56 56" width="56" height="56" aria-hidden="true">' +
+          '<circle class="device-facing-marker-body" cx="28" cy="28" r="22" fill="' + accentHex + '"/>' +
+          '<circle cx="28" cy="28" r="22" fill="none" stroke="rgba(0,0,0,0.22)" stroke-width="1.4"/>' +
+        '</svg></div>' +
+        '<div class="device-facing-marker-top"><svg viewBox="0 0 56 56" width="56" height="56" aria-hidden="true">' +
+          '<circle class="device-facing-marker-pulse-ring" cx="28" cy="28" r="21" fill="none" stroke="' + accentHex + '" stroke-width="3.2"/>' +
+          '<circle class="device-facing-marker-ring" cx="28" cy="28" r="20" fill="#fff" stroke="' + accentHex + '" stroke-width="3"/>' +
+          '<circle cx="28" cy="28" r="14.5" fill="#fff" stroke="rgba(17,17,17,0.26)" stroke-width="1.1"/>' +
+          arrow +
+        '</svg></div>' +
+      '</div>';
     }
 
     function createCurrentPositionIcon(deviceKey, normalizedHeading, isSelectedAllMode) {
@@ -8807,11 +8888,13 @@
       const arrow = element && element.querySelector ? element.querySelector('.device-facing-arrow') : null;
       const ring = element && element.querySelector ? element.querySelector('.device-facing-marker-ring') : null;
       const pulseRing = element && element.querySelector ? element.querySelector('.device-facing-marker-pulse-ring') : null;
+      const body = element && element.querySelector ? element.querySelector('.device-facing-marker-body') : null;
       const accent = getDeviceAccentColor(deviceKey);
       if (ring) ring.setAttribute('stroke', accent);
       if (pulseRing) pulseRing.setAttribute('stroke', accent);
-      if (arrow && normalizedHeading !== null && !isHeadingUpBearingControlActive()) {
-        arrow.style.transform = 'rotate(' + facingIconScreenHeading(normalizedHeading) + 'deg)';
+      if (body) body.setAttribute('fill', accent);
+      if (arrow && normalizedHeading !== null) {
+        arrow.style.transform = 'rotate(' + normalizedHeading + 'deg)';
         return;
       }
       marker.setIcon(createCurrentPositionIcon(deviceKey, normalizedHeading, isSelectedAllMode));
@@ -9563,11 +9646,40 @@
       rebuildSavedRouteAndPlaceColors();
     }
 
+    // Sichtbare Routen ueber einen Refresh hinweg erhalten: nur Layer entfernen,
+    // deren Route nicht mehr existiert, und gewuenschte (zuvor sichtbare) Routen
+    // ohne erneutes Karten-Fit wiederherstellen. Verhindert "markiert dann entkoppelt".
+    function reconcileVisibleSavedRouteLayers(desiredVisibleRouteIds) {
+      if (!state.map) return;
+      const routeStillExists = function (routeId) {
+        return state.savedRoutes.some(function (routeEntry) {
+          return routeEntry && routeEntry.id === routeId;
+        });
+      };
+      Object.keys(state.visibleSavedRouteLayers).forEach(function (routeId) {
+        const keepVisible = desiredVisibleRouteIds.indexOf(routeId) >= 0 && routeStillExists(routeId);
+        if (keepVisible) return;
+        const layerBundle = state.visibleSavedRouteLayers[routeId];
+        if (layerBundle) {
+          state.map.removeLayer(layerBundle.line);
+          if (layerBundle.startMarker) state.map.removeLayer(layerBundle.startMarker);
+          if (layerBundle.endMarker) state.map.removeLayer(layerBundle.endMarker);
+        }
+        delete state.visibleSavedRouteLayers[routeId];
+      });
+      desiredVisibleRouteIds.forEach(function (routeId) {
+        if (!state.visibleSavedRouteLayers[routeId] && routeStillExists(routeId)) {
+          setSavedRouteVisibility(routeId, true, { skipFit: true });
+        }
+      });
+      renderVisiblePlacesLegend();
+    }
+
     async function loadSavedRoutes() {
-      if (state.map) {
-        clearSavedRouteLayers();
-      }
-      const selectedDeviceKey = getSavedItemsDeviceKey();
+      const desiredVisibleRouteIds = state.map ? Object.keys(state.visibleSavedRouteLayers) : [];
+      // Im ALL-Modus Routen aller Geraete laden (kein deviceKey-Filter), damit
+      // Routen verschiedener Geraete gleichzeitig anzeigbar sind.
+      const selectedDeviceKey = state.showAllDevicesOnMap ? '' : getSavedItemsDeviceKey();
       const routesUrl = selectedDeviceKey
         ? '/api/routes?deviceKey=' + encodeURIComponent(selectedDeviceKey)
         : '/api/routes';
@@ -9583,6 +9695,7 @@
         renderRoutesList();
         renderVisiblePlacesLegend();
         rebuildSavedRouteAndPlaceColors();
+        reconcileVisibleSavedRouteLayers(desiredVisibleRouteIds);
         return;
       }
       try {
@@ -9594,6 +9707,7 @@
       renderRoutesList();
       renderVisiblePlacesLegend();
       rebuildSavedRouteAndPlaceColors();
+      reconcileVisibleSavedRouteLayers(desiredVisibleRouteIds);
     }
 
     function getRouteColor(savedRoute) {
@@ -9614,10 +9728,11 @@
       return SAVED_ITEM_COLOR_UNKNOWN_HEX;
     }
 
-    function setSavedRouteVisibility(routeId, shouldBeVisible) {
+    function setSavedRouteVisibility(routeId, shouldBeVisible, options) {
       if (!routeId) {
         return;
       }
+      const skipFit = !!(options && options.skipFit);
       const savedRoute = state.savedRoutes.find(function (routeEntry) {
         return routeEntry && routeEntry.id === routeId;
       });
@@ -9671,7 +9786,9 @@
 
       state.visibleSavedRouteLayers[routeId] = { line: routeLine, startMarker: startMarker, endMarker: endMarker };
       renderVisiblePlacesLegend();
-      fitMapToVisibleSavedRoutesAndPlaces();
+      // Beim Wiederherstellen nach einem Hintergrund-Refresh nicht erneut auf die
+      // Route zoomen (sonst springt die Karte bei jedem Refresh).
+      if (!skipFit) fitMapToVisibleSavedRoutesAndPlaces();
     }
 
     function toggleSavedRouteVisibility(routeId) {
@@ -9764,16 +9881,16 @@
       const pointCount = Array.isArray(historyJson.data) ? historyJson.data.length : 0;
       if (pointCount < 2) {
         window.alert('Keine Trackingdaten für eine Route vorhanden (mindestens 2 Punkte nötig).');
-        return;
+        return false;
       }
       const routeName = window.prompt('Bitte Namen für die Route eingeben:');
       if (routeName === null) {
-        return;
+        return false;
       }
       const trimmedRouteName = routeName.trim();
       if (!trimmedRouteName) {
         window.alert('Bitte einen gültigen Namen eingeben.');
-        return;
+        return false;
       }
       const routePointsForSave = (historyJson.data || [])
         .map(function (p) {
@@ -9788,10 +9905,12 @@
         });
       if (routePointsForSave.length < 2) {
         window.alert('Keine gültigen Trackingpunkte für eine Route (mindestens 2 Punkte nötig).');
-        return;
+        return false;
       }
       let saveResult = null;
       try {
+        // Handy speichert immer zuerst nur lokal; der Upload zum Server erfolgt
+        // ausschliesslich ueber den Sync-Button. Im Web direkt zum Server.
         if (isNativeAppContext()) throw new Error('local-only');
         saveResult = await fetchJson('/api/routes', {
           method: 'POST',
@@ -9814,21 +9933,31 @@
           localOnly: true
         }) };
       }
-      window.alert('Die Route wurde gespeichert.');
-      if (saveResult && saveResult.data && saveResult.data.localOnly) {
+      // Nicht-blockierende Bestaetigung, damit der Dialog/Trackingstart sofort
+      // weiterlaeuft, waehrend die Liste im Hintergrund aktualisiert wird.
+      showLocateLoadingBadge('Route gespeichert');
+      setTimeout(hideLocateLoadingBadge, 1500);
+      const savedEntry = saveResult && saveResult.data ? saveResult.data : null;
+      if (savedEntry && savedEntry.localOnly) {
         state.savedRoutes = mergeServerAndLocalItems(
           state.savedRoutes,
           readVisibleLocalSavedItems(LOCAL_SAVED_ROUTES_STORAGE_KEY, selectedDeviceKey)
         );
-        setSavedRouteVisibility(saveResult.data.id, true);
-        renderRoutesList();
-        return;
+      } else if (savedEntry && savedEntry.id) {
+        // Optimistisch sofort anzeigen; vollstaendiger Server-Abgleich folgt im Hintergrund.
+        if (!Array.isArray(savedEntry.points) || savedEntry.points.length < 2) {
+          savedEntry.points = routePointsForSave;
+        }
+        state.savedRoutes = mergeServerAndLocalItems(state.savedRoutes, [savedEntry]);
       }
-      await loadSavedRoutes();
-      if (saveResult && saveResult.data && saveResult.data.id) {
-        setSavedRouteVisibility(saveResult.data.id, true);
-        renderRoutesList();
+      if (savedEntry && savedEntry.id) {
+        setSavedRouteVisibility(savedEntry.id, true);
       }
+      renderRoutesList();
+      if (!(savedEntry && savedEntry.localOnly)) {
+        loadSavedRoutes().catch(function () {});
+      }
+      return true;
     }
 
     function getPlaceColor(savedPlace) {
@@ -10274,6 +10403,7 @@
           : null;
         state.trackingEnabled = effectiveTrackingActiveFromStatus(selectedDeviceKey, trackingStatusData);
         updateTrackingButtonLabel();
+        checkServerLocalTrackingMismatch(selectedDeviceKey, trackingStatusData);
         updateTrackingStatusChip();
         const cleanedCount = state.trackingEnabled
           ? (typeof historyJson.count === 'number' ? historyJson.count : history.length)
@@ -11840,10 +11970,20 @@
       if (headingDegrees !== undefined && headingDegrees !== null) {
         state.latestHeadingDegrees = normalizeHeadingDegrees(headingDegrees);
       }
+      // Aus der Ferne erst Nord-oben hinfliegen/zoomen; die Drehung in Fahrtrichtung
+      // erfolgt nach der Ankunft (z.B. via restoreLocateFollowAfterValidCenter).
+      let flyBearing = navigationFlyBearingOption();
+      try {
+        const currentBounds = typeof state.map.getBounds === 'function' ? state.map.getBounds() : null;
+        const targetIsFarAway = currentBounds && typeof currentBounds.contains === 'function'
+          ? !currentBounds.contains([targetLat, targetLon])
+          : false;
+        if (targetIsFarAway) flyBearing = 0;
+      } catch (boundsError) { /* Fallback: normale Peilung */ }
       state.map.flyTo(
         [targetLat, targetLon],
         16,
-        { duration: 1.1, easeLinearity: 0.12, bearing: navigationFlyBearingOption() }
+        { duration: 1.1, easeLinearity: 0.12, bearing: flyBearing, pitch: MAP_DRIVE_VIEW_PITCH_DEG }
       );
       state.lastKnownCurrentLatLng = [targetLat, targetLon];
       state.hasCenteredOnCurrentLocation = true;
@@ -11860,7 +12000,7 @@
       if (navigationMapDockControlsMap()) {
         animateNavigationMapDockFollow(targetLat, targetLon, closeZoomLevel, true, null, Math.round(NAV_START_FLY_TO_DURATION_SEC * 1000));
       } else {
-        withSuppressedProgrammaticMapInteraction(function () { state.map.flyTo([targetLat, targetLon], closeZoomLevel, { duration: NAV_START_FLY_TO_DURATION_SEC, easeLinearity: 0.12, bearing: navigationFlyBearingOption() }); }, Math.round(NAV_START_FLY_TO_DURATION_SEC * 1000) + 250);
+        withSuppressedProgrammaticMapInteraction(function () { state.map.flyTo([targetLat, targetLon], closeZoomLevel, { duration: NAV_START_FLY_TO_DURATION_SEC, easeLinearity: 0.12, bearing: navigationFlyBearingOption(), pitch: MAP_DRIVE_VIEW_PITCH_DEG }); }, Math.round(NAV_START_FLY_TO_DURATION_SEC * 1000) + 250);
       }
       scheduleNavigationDriveZoomStepOutAfterCloseView(targetLat, targetLon, snapToken, Math.round(NAV_START_FLY_TO_DURATION_SEC * 1000) + 250);
     }
@@ -12026,6 +12166,7 @@
       if (typeof state.map.stop === 'function') state.map.stop();
       disableHeadingUpBearingByUserInteraction();
       setProgrammaticMapBearingImmediate(0);
+      resetMapPitchFlat();
       if (typeof state.map.flyToBounds === 'function') {
         state.map.flyToBounds(routeBounds, {
           padding: { top: 150, bottom: 260, left: 150, right: 150 },
@@ -12692,8 +12833,38 @@
       }
       try {
         await resetTrackingData(selectedDeviceKey || undefined);
+
+        // Handy: rein lokaler Reset ohne jegliche Server-Anfrage (kein POST/GET).
+        // Die Tracking-Route NICHT serverseitig neu laden, sonst kaeme die gerade
+        // geleerte Route sofort wieder. Live-Punkte laufen unveraendert weiter.
         if (selectedDeviceKey && isNativeAppContext() && isNativePhoneDeviceKey(selectedDeviceKey)) {
           await syncNativeTrackingBridge(false, selectedDeviceKey);
+          state.pointsCounterDeviceKey = '';
+          state.pointsCounterPrevReceivedByKey = {};
+          updateDevicePointCounters(0, 0, selectedDeviceKey);
+          updateSyncPendingCounter(0);
+          delete state.showLatestTrackingRouteByKey[selectedDeviceKey];
+          removeLatestTrackingRouteLine(selectedDeviceKey);
+          updateTrackingRouteButtonLabel();
+          state.shouldAutoFitTrackLine = false;
+          if (state.trackLine) {
+            state.map.removeLayer(state.trackLine);
+            state.trackLine = null;
+          }
+          removeStartMarker();
+          clearRouteVisualization();
+          removeFailsafeReturnMarker();
+          removeFailsafeReturnRouteLine();
+          removeFailsafeOverlayForDevice(selectedDeviceKey);
+          delete state.failsafeBreakNoticeShownByKey[selectedDeviceKey];
+          state.trackingEnabled = false;
+          updateTrackingButtonLabel();
+          updateTrackingStatusChip();
+          return;
+        }
+        if (selectedDeviceKey && !isNativeAppContext()) {
+          // Web/Server: das Handy zusaetzlich per Command lokal zuruecksetzen.
+          sendTrackingCommandToDevice(selectedDeviceKey, 'tracking_reset');
         }
 
         state.pointsCounterDeviceKey = '';
@@ -12787,11 +12958,48 @@
         state.map.removeLayer(routeLine);
         delete state.latestTrackingRouteLineByKey[deviceKey];
       }
+      removeTrackingRouteBreakConnectors(deviceKey);
       const startMarker = state.latestTrackingStartMarkerByKey[deviceKey];
       if (startMarker) {
         state.map.removeLayer(startMarker);
         delete state.latestTrackingStartMarkerByKey[deviceKey];
       }
+    }
+
+    function removeTrackingRouteBreakConnectors(deviceKey) {
+      const connectors = state.latestTrackingRouteConnectorByKey[deviceKey];
+      if (Array.isArray(connectors)) {
+        connectors.forEach(function (connectorLine) {
+          if (connectorLine && state.map) state.map.removeLayer(connectorLine);
+        });
+      }
+      delete state.latestTrackingRouteConnectorByKey[deviceKey];
+    }
+
+    function renderTrackingRouteBreakConnectors(deviceKey, routeSegments) {
+      // Verbindet aufeinanderfolgende Routenteile (Tracking gestoppt/unterbrochen
+      // dann fortgesetzt) mit einer gepunkteten Linie.
+      removeTrackingRouteBreakConnectors(deviceKey);
+      if (!state.map || !Array.isArray(routeSegments) || routeSegments.length < 2) return;
+      const connectorColor = state.showAllDevicesOnMap ? getDeviceAccentColor(deviceKey) : '#111111';
+      const connectors = [];
+      for (let segmentIndex = 0; segmentIndex < routeSegments.length - 1; segmentIndex += 1) {
+        const currentSegment = routeSegments[segmentIndex];
+        const nextSegment = routeSegments[segmentIndex + 1];
+        if (!currentSegment || !currentSegment.length || !nextSegment || !nextSegment.length) continue;
+        const breakStart = currentSegment[currentSegment.length - 1];
+        const breakEnd = nextSegment[0];
+        if (!breakStart || !breakEnd) continue;
+        const connectorLine = L.polyline([breakStart, breakEnd], withVectorRenderer({
+          color: connectorColor,
+          weight: Math.max(2, NAV_ROUTE_CASING_WEIGHT - 3),
+          opacity: 0.85,
+          dashArray: '2 10',
+          lineCap: 'round'
+        })).addTo(state.map);
+        connectors.push(connectorLine);
+      }
+      if (connectors.length) state.latestTrackingRouteConnectorByKey[deviceKey] = connectors;
     }
 
     function dockLatestTrackingRouteEndToLatLng(lat, lon, deviceKey) {
@@ -12973,6 +13181,7 @@
         })).addTo(state.map);
         state.latestTrackingRouteLineByKey[deviceKey] = routeLine;
       }
+      renderTrackingRouteBreakConnectors(deviceKey, routeSegments);
       if (state.trackingEnabled && deviceKey === getSelectedDeviceKey() && state.lastKnownCurrentLatLng) {
         dockLatestTrackingRouteEndToLatLng(state.lastKnownCurrentLatLng[0], state.lastKnownCurrentLatLng[1], deviceKey);
       }
@@ -13070,6 +13279,7 @@
         : null;
       state.trackingEnabled = effectiveTrackingActiveFromStatus(selectedKey, trackingStatusData);
       updateTrackingButtonLabel();
+      checkServerLocalTrackingMismatch(selectedKey, trackingStatusData);
       updateTrackingStatusChip();
       if (!state.showAllDevicesOnMap && shouldRunClientFailsafeUiForDevice(getSelectedDeviceKey())) {
         updateFailsafeStateFromTrackingStatus(trackingStatusData);
@@ -13080,6 +13290,198 @@
       syncNativeTrackingBridge(state.trackingEnabled, getSelectedDeviceKey());
     }
 
+    function showChoiceDialog(options) {
+      options = options || {};
+      return new Promise(function (resolve) {
+        if (state.choiceDialogOpen) {
+          resolve(null);
+          return;
+        }
+        state.choiceDialogOpen = true;
+        const overlay = document.createElement('div');
+        overlay.className = 'choice-dialog-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;background:rgba(8,16,24,.55);padding:18px;';
+        const card = document.createElement('div');
+        card.style.cssText = 'background:#fff;color:#101820;border-radius:14px;max-width:420px;width:100%;box-shadow:0 22px 60px rgba(0,0,0,.4);padding:18px 18px 14px;';
+        const titleEl = document.createElement('div');
+        titleEl.style.cssText = 'font-size:18px;font-weight:700;margin-bottom:8px;';
+        titleEl.textContent = options.title || '';
+        const messageEl = document.createElement('div');
+        messageEl.style.cssText = 'font-size:14px;line-height:1.5;color:#33424f;margin-bottom:16px;';
+        messageEl.textContent = options.message || '';
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;';
+        card.appendChild(titleEl);
+        card.appendChild(messageEl);
+        function finish(value) {
+          if (!state.choiceDialogOpen) return;
+          state.choiceDialogOpen = false;
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          resolve(value);
+        }
+        (options.buttons || []).forEach(function (buttonSpec) {
+          const buttonElement = document.createElement('button');
+          buttonElement.type = 'button';
+          const isDanger = buttonSpec.kind === 'danger';
+          const isPrimary = buttonSpec.kind === 'primary';
+          const background = isDanger ? '#d9534f' : (isPrimary ? '#0275d8' : '#e6edf3');
+          const foreground = (isDanger || isPrimary) ? '#fff' : '#1b2a36';
+          buttonElement.style.cssText = 'border:0;border-radius:9px;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;background:' + background + ';color:' + foreground + ';';
+          buttonElement.textContent = buttonSpec.label || buttonSpec.id;
+          buttonElement.addEventListener('click', function () { finish(buttonSpec.id); });
+          actions.appendChild(buttonElement);
+        });
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        overlay.addEventListener('click', function (clickEvent) {
+          if (clickEvent.target === overlay && options.dismissible !== false) finish(null);
+        });
+        document.body.appendChild(overlay);
+      });
+    }
+
+    function sendTrackingCommandToDevice(deviceKey, action) {
+      const key = String(deviceKey || '').trim();
+      if (action === 'tracking_start' && key) {
+        state.mismatchSuppressUntilByKey = state.mismatchSuppressUntilByKey || {};
+        state.mismatchSuppressUntilByKey[key] = Date.now() + MISMATCH_SUPPRESS_AFTER_START_MS;
+      }
+      if (!key || !browserSeemsOnline()) return Promise.resolve(false);
+      return fetchJson('/mobile/api/request-location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceKey: key, action: action })
+      }).then(function () { return true; }).catch(function () { return false; });
+    }
+
+    function applyLocalTrackingStop(deviceKey) {
+      const key = String(deviceKey || getNativePhoneDeviceKey() || '').trim();
+      if (!key) return Promise.resolve(false);
+      if (getSelectedDeviceKey() === key) {
+        state.trackingEnabled = false;
+        updateTrackingButtonLabel();
+        updateTrackingStatusChip();
+        removeFailsafeReturnMarker();
+        removeFailsafeReturnRouteLine();
+        delete state.failsafeBreakNoticeShownByKey[key];
+        state.shouldAutoFitTrackLine = false;
+      }
+      state.autoFollowResumeArmed = false;
+      clearAutoFollowResumeTimer();
+      setLocalTrackingState(key, false, false);
+      return syncNativeTrackingBridge(false, key);
+    }
+
+    function applyLocalTrackingStart(deviceKey) {
+      const key = String(deviceKey || getNativePhoneDeviceKey() || '').trim();
+      if (!key) return Promise.resolve(false);
+      if (getSelectedDeviceKey() === key) {
+        state.trackingEnabled = true;
+        updateTrackingButtonLabel();
+        updateTrackingStatusChip();
+        state.shouldAutoFitTrackLine = true;
+        state.userHasInteractedWithMap = false;
+        state.autoFollowEnabled = true;
+        state.autoFollowResumeArmed = true;
+      }
+      setLocalTrackingState(key, true, false);
+      return syncNativeTrackingBridge(true, key).then(function () {
+        setLocalTrackingState(key, true, false);
+        if (getSelectedDeviceKey() === key) updateTrackingStatusChip();
+        return true;
+      });
+    }
+
+    function discardLocalRoute(deviceKey) {
+      const bridge = window.CapacitorMobileBridge;
+      if (bridge && typeof bridge.resetLocalRoute === 'function') bridge.resetLocalRoute();
+    }
+
+    // Der Speichern/Uebertragen/Verwerfen-Dialog laeuft nur noch auf der Webseite
+    // (siehe decideWebLeftoverRoute in toggleTracking). Das Handy startet lokal
+    // ohne Dialog; eine vorhandene lokale Route wird per Segment-Bruch fortgesetzt.
+    async function startLocalTrackingWithStateMachine(deviceKey) {
+      const key = String(deviceKey || getNativePhoneDeviceKey() || '').trim();
+      if (!key) return;
+      await applyLocalTrackingStart(key);
+    }
+
+    function handleRemoteTrackingCommand(detail) {
+      const action = String(detail && detail.action || '').trim();
+      const nativeKey = getNativePhoneDeviceKey();
+      if (!nativeKey) return;
+      if (action === 'tracking_start') {
+        startLocalTrackingWithStateMachine(nativeKey).catch(function (commandError) {
+          console.warn('Tracking-Start-Kommando fehlgeschlagen:', commandError);
+        });
+      } else if (action === 'tracking_stop') {
+        applyLocalTrackingStop(nativeKey);
+      } else if (action === 'tracking_reset') {
+        discardLocalRoute(nativeKey);
+        applyLocalTrackingStop(nativeKey);
+      }
+    }
+
+    function checkServerLocalTrackingMismatch(deviceKey, trackingStatusData) {
+      if (isNativeAppContext()) return;
+      const key = String(deviceKey || '').trim();
+      if (!key || !trackingStatusData) return;
+      state.serverActiveLocalStoppedByKey = state.serverActiveLocalStoppedByKey || {};
+      state.serverLocalMismatchPromptByKey = state.serverLocalMismatchPromptByKey || {};
+      const serverActive = trackingStatusData.active === true;
+      const mismatch = serverActive && trackingStatusData.localActive === false;
+      state.serverActiveLocalStoppedByKey[key] = mismatch;
+      if (!mismatch) {
+        state.serverLocalMismatchPromptByKey[key] = false;
+        return;
+      }
+      if (state.serverLocalMismatchPromptByKey[key]) return;
+      state.mismatchSuppressUntilByKey = state.mismatchSuppressUntilByKey || {};
+      if (Date.now() < (state.mismatchSuppressUntilByKey[key] || 0)) return;
+      state.serverLocalMismatchPromptByKey[key] = true;
+      showChoiceDialog({
+        title: 'Tracking auf dem Handy gestoppt',
+        message: 'Der Server zeichnet die Route weiter auf, aber das Handy hat das lokale Tracking gestoppt. Tracking auf dem Handy erneut starten?',
+        buttons: [
+          { id: 'restart', label: 'Erneut starten', kind: 'primary' },
+          { id: 'cancel', label: 'Abbrechen' }
+        ]
+      }).then(function (choice) {
+        if (choice === 'restart') {
+          sendTrackingCommandToDevice(key, 'tracking_start');
+        }
+      });
+    }
+
+    // Web/Server: vor einem Tracking-Start pruefen, ob fuer das Geraet bereits eine
+    // (noch nicht gespeicherte) Route auf dem Server vorliegt. Falls ja, den Dialog
+    // auf der Webseite zeigen. Rueckgabe: 'none' (normal starten), 'save' | 'transfer'
+    // | 'discard' oder 'cancel' (Abbruch).
+    async function decideWebLeftoverRoute(deviceKey) {
+      if (isNativeAppContext()) return 'none';
+      if (!browserSeemsOnline()) return 'none';
+      let pointCount = 0;
+      try {
+        const historyJson = await fetchHistoryForSelectedDevice();
+        pointCount = historyJson && Array.isArray(historyJson.data) ? historyJson.data.length : 0;
+      } catch (historyError) {
+        return 'none';
+      }
+      if (pointCount < 2) return 'none';
+      const choice = await showChoiceDialog({
+        title: 'Vorhandene Route',
+        message: 'Für dieses Gerät liegt bereits eine Route vor. Was soll damit geschehen, bevor das Tracking neu startet?',
+        buttons: [
+          { id: 'save', label: 'Speichern', kind: 'primary' },
+          { id: 'transfer', label: 'Übertragen' },
+          { id: 'discard', label: 'Verwerfen', kind: 'danger' }
+        ]
+      });
+      return choice || 'cancel';
+    }
+
     async function toggleTracking() {
       const deviceKeyForTracking = getSelectedDeviceKey();
       if (!deviceKeyForTracking) {
@@ -13088,47 +13490,37 @@
       }
       const shouldStartTracking = !state.trackingEnabled;
       const trackingControlEndpoint = shouldStartTracking ? '/api/tracking/start' : '/api/tracking/stop';
+      // Handy: rein lokal steuern (keine HTTPS-Tracking-Calls), Server erfaehrt den
+      // Zustand ueber die winzige MQTT-Statusmeldung der Bridge.
       if (isNativeAppContext() && isNativePhoneDeviceKey(deviceKeyForTracking)) {
-        state.trackingEnabled = shouldStartTracking;
-        setLocalTrackingState(deviceKeyForTracking, state.trackingEnabled, true);
-        updateTrackingButtonLabel();
-        updateTrackingStatusChip();
-        if (!state.trackingEnabled) {
-          removeFailsafeReturnMarker();
-          removeFailsafeReturnRouteLine();
-          delete state.failsafeBreakNoticeShownByKey[deviceKeyForTracking];
-          state.shouldAutoFitTrackLine = false;
+        if (shouldStartTracking) {
+          await startLocalTrackingWithStateMachine(deviceKeyForTracking);
         } else {
-          state.shouldAutoFitTrackLine = true;
-          state.userHasInteractedWithMap = false;
-        }
-        syncNativeTrackingBridge(state.trackingEnabled, deviceKeyForTracking).then(function () {
-          setLocalTrackingState(deviceKeyForTracking, state.trackingEnabled, true);
-          updateTrackingStatusChip();
-        });
-        if (browserSeemsOnline()) {
-          fetchJson(trackingControlEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ deviceKey: deviceKeyForTracking })
-          }).then(function (trackingControlResponse) {
-            const trackingControlData = trackingControlResponse && trackingControlResponse.data
-              ? trackingControlResponse.data
-              : null;
-            const active = !!(trackingControlData && trackingControlData.active);
-            clearLocalTrackingSyncPending(deviceKeyForTracking, active);
-            if (getSelectedDeviceKey() === deviceKeyForTracking) {
-              state.trackingEnabled = active;
-              updateTrackingButtonLabel();
-              updateTrackingStatusChip();
-              loadTracking().catch(function () {});
-            }
-          }).catch(function (trackingSyncError) {
-            console.warn('Tracking-Status wird spaeter synchronisiert:', trackingSyncError);
-          });
+          await applyLocalTrackingStop(deviceKeyForTracking);
         }
         return;
       }
+      // Web/Server: vor dem Start auf der Webseite ueber eine vorhandene Route
+      // entscheiden. Die Entscheidung wird serverseitig ausgefuehrt (Speichern bzw.
+      // Reset) und das Handy nur per Reset-Command nachgezogen.
+      if (shouldStartTracking) {
+        const routeDecision = await decideWebLeftoverRoute(deviceKeyForTracking);
+        if (routeDecision === 'cancel') return;
+        if (routeDecision === 'save') {
+          const savedOk = await saveCurrentRoute();
+          if (!savedOk) return;
+        }
+        if (routeDecision === 'save' || routeDecision === 'discard') {
+          try {
+            await resetTrackingData(deviceKeyForTracking);
+          } catch (resetError) {
+            // Server-Reset ist best effort; der Trackingstart laeuft trotzdem weiter.
+          }
+          sendTrackingCommandToDevice(deviceKeyForTracking, 'tracking_reset');
+        }
+        // 'transfer'/'none': bestehende Route behalten und weiter tracken.
+      }
+      // Web/Server: Server-Status setzen UND das Handy per MQTT-Command fernsteuern.
       const trackingControlResponse = await fetchJson(trackingControlEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -13140,6 +13532,7 @@
       state.trackingEnabled = !!(trackingControlData && trackingControlData.active);
       updateTrackingButtonLabel();
       updateTrackingStatusChip();
+      sendTrackingCommandToDevice(deviceKeyForTracking, shouldStartTracking ? 'tracking_start' : 'tracking_stop');
       if (!state.trackingEnabled) {
         removeFailsafeReturnMarker();
         removeFailsafeReturnRouteLine();
@@ -13355,8 +13748,12 @@
     }
 
     function restoreLocateFollowAfterValidCenter(markerPosition) {
+      // Zoom ist abgeschlossen -> Drehung wieder freigeben und in Fahrtrichtung drehen.
+      state.locateZoomInProgress = false;
       state.autoFollowEnabled = true;
       state.userHasInteractedWithMap = false;
+      state.autoFollowResumeArmed = true;
+      clearAutoFollowResumeTimer();
       enableHeadingUpBearingControl();
       const heading = normalizeHeadingDegrees(markerPosition && markerPosition.heading);
       if (heading !== null) {
@@ -13375,6 +13772,8 @@
       if (selectedDeviceKey) {
         state.lastKnownLatLngByDevice[selectedDeviceKey] = [markerPosition.lat, markerPosition.lon];
       }
+      // Zoom-Phase markieren: bis zum Abschluss des flyTo wird nicht gedreht.
+      state.locateZoomInProgress = true;
       applyLivePositionEntryToMap(markerPosition);
       flyMapToDeviceLocationAnimated(markerPosition.lat, markerPosition.lon, markerPosition.heading, true);
       return true;
@@ -13382,6 +13781,17 @@
 
     async function centerOnCurrentLocation() {
       const locateToggleButton = byId('locateToggleBtn');
+      // Zweiter Klick waehrend aktivem Folgen beendet das Folgen (freies Bewegen).
+      if (state.autoFollowResumeArmed && state.autoFollowEnabled &&
+        (Date.now() - (state.lastLocateClickMs || 0) >= LOCATE_FOLLOW_TOGGLE_MIN_GAP_MS)) {
+        state.autoFollowResumeArmed = false;
+        state.autoFollowEnabled = false;
+        clearAutoFollowResumeTimer();
+        disableHeadingUpBearingByUserInteraction();
+        state.lastLocateClickMs = Date.now();
+        if (locateToggleButton) locateToggleButton.classList.remove('active');
+        return;
+      }
       if (locateToggleButton) {
         locateToggleButton.classList.add('active');
       }
@@ -13391,10 +13801,12 @@
       const hardRefresh = locateClickMs - (state.lastLocateClickMs || 0) < 900;
       state.lastLocateClickMs = locateClickMs;
       const nativeLocateKey = isNativeAppContext() ? getNativePhoneDeviceKey() : '';
-      if (nativeLocateKey) {
+      // Nur als Default auf das eigene Handy zentrieren. Hat der Nutzer in der
+      // Geraeteliste bewusst ein anderes Geraet gewaehlt, bleibt dieses ausgewaehlt
+      // und wird zentriert/verfolgt (nicht zwangsweise auf das eigene Handy zurueck).
+      if (nativeLocateKey && !state.userSelectedDeviceKey) {
         enforceSelectedDeviceKey(nativeLocateKey);
         state.selectedDeviceKey = nativeLocateKey;
-        state.userSelectedDeviceKey = false;
       }
       const startedFromAllMode = state.showAllDevicesOnMap;
       showLocateLoadingBadge('Standort wird angefordert...');
@@ -13512,6 +13924,8 @@
         await finalCenterDone;
         restoreLocateFollowAfterValidCenter(markerPosition);
       } finally {
+        // Zoom-Schutz auf jeden Fall wieder loesen (auch bei Fehler/Abbruch).
+        state.locateZoomInProgress = false;
         hideLocateLoadingBadge();
         if (locateToggleButton) {
           setTimeout(function () { locateToggleButton.classList.remove('active'); }, LOCATE_BUTTON_ACTIVE_MS);
@@ -13712,13 +14126,19 @@
         const delta = ((normalizedHeading - previous + 540) % 360) - 180;
         const absDelta = Math.abs(delta);
         const mapFilter = getMapHeadingFilterLimits();
+        let step;
         if (absDelta > mapFilter.spikeRejectDeg) {
-          return;
+          // Spitze NICHT verwerfen (sonst friert die Richtung ein), sondern
+          // begrenzt nachziehen, damit die Fahrtrichtung lebendig bleibt.
+          const clampStepDeg = Math.max(6, mapFilter.spikeRejectDeg * 0.5);
+          step = (delta < 0 ? -1 : 1) * Math.min(absDelta, clampStepDeg);
+        } else {
+          const smoothAlpha = absDelta > mapFilter.largeJumpSoftDeg
+            ? Math.max(0.08, mapFilter.smoothAlphaDeg * 0.65)
+            : mapFilter.smoothAlphaDeg;
+          step = delta * smoothAlpha;
         }
-        const smoothAlpha = absDelta > mapFilter.largeJumpSoftDeg
-          ? Math.max(0.08, mapFilter.smoothAlphaDeg * 0.65)
-          : mapFilter.smoothAlphaDeg;
-        normalizedHeading = (previous + delta * smoothAlpha + 360) % 360;
+        normalizedHeading = (previous + step + 360) % 360;
       }
       state.lastHeadingDegreesByDeviceKey[deviceKey] = normalizedHeading;
       persistLastHeadingsToStorage();
@@ -13741,11 +14161,14 @@
       const dk = getSelectedDeviceKey() || (positionEntry && positionEntry.key) || '';
       const nh = normalizeHeadingDegrees(positionEntry && positionEntry.heading);
       let eff;
-      if (isNativePhoneDeviceKey(dk)) {
-        eff = effectiveHeadingForDeviceDisplay(dk, null);
-      } else {
+      // Auch fuer das Handy die frische (fusionierte, bewegungsbasierte) Peilung
+      // einbeziehen: ein gueltiges Bewegungs-Heading darf nie durch eine
+      // veraltete gespeicherte Richtung ersetzt werden -> kein Einfrieren.
+      if (nh !== null) {
         rememberHeadingForDeviceKey(dk, nh);
         eff = effectiveHeadingForDeviceDisplay(dk, nh);
+      } else {
+        eff = effectiveHeadingForDeviceDisplay(dk, null);
       }
       if (eff != null) state.latestHeadingDegrees = eff;
 
@@ -14210,7 +14633,10 @@
       var autoEl = byId('nativeProfileMapRotationAuto');
       var secEl = byId('nativeProfileMapRotationSec');
       if (!autoEl || !secEl) return;
-      secEl.disabled = !autoEl.checked;
+      // Automatik an -> Feld gesperrt (grau) und zeigt den automatischen Wert.
+      // Automatik aus -> manuelle Eingabe erlaubt.
+      secEl.disabled = autoEl.checked;
+      if (autoEl.checked) secEl.value = String(readMapRotationSmoothSec());
     }
 
     function readNativeProfileHeadingFilterFromForm() {
@@ -14339,6 +14765,27 @@
         localStorage.setItem('gpsMapRotationAuto', byId('nativeProfileMapRotationAuto').checked ? '1' : '0');
         localStorage.setItem('gpsMapRotationSec', String(Number(byId('nativeProfileMapRotationSec').value) || 0.35));
       } catch (e) {}
+    }
+
+    function applyMapRotationAutoRuntimeState() {
+      if (!state.map) return;
+      if (isMapRotationAutoEnabled()) {
+        // Drehung wieder freigeben und in aktuelle Fahrtrichtung drehen.
+        if (state.autoFollowEnabled && !state.userHasInteractedWithMap) {
+          enableHeadingUpBearingControl();
+          var eff = effectiveHeadingForDeviceDisplay(getSelectedDeviceKey(), state.latestHeadingDegrees);
+          if (eff !== null) syncMapBearingFromHeading(eff);
+        }
+      } else {
+        // Drehung aus: Karte sofort Nord-oben stellen.
+        state.headingUpBearingEnabled = false;
+        cancelMapBearingAnimation();
+        setProgrammaticMapBearingImmediate(0);
+        var dk = getSelectedDeviceKey();
+        if (state.currentMarker && typeof state.currentMarker.setIcon === 'function') {
+          updateCurrentPositionIcon(state.currentMarker, dk, effectiveHeadingForDeviceDisplay(dk, state.latestHeadingDegrees));
+        }
+      }
     }
 
     function readNativeProfileStandard() {
@@ -14641,7 +15088,15 @@
         });
         profileSheet.addEventListener('input', function (event) {
           markNativeProfileRanges();
-          if (event.target && event.target.id === 'nativeProfileMapRotationAuto') syncMapRotationFormUi();
+          if (event.target && event.target.id === 'nativeProfileMapRotationAuto') {
+            syncMapRotationFormUi();
+            // Sofort wirksam machen (ohne dass erst gespeichert werden muss).
+            saveMapRotationPrefsFromForm();
+            applyMapRotationAutoRuntimeState();
+          }
+          if (event.target && event.target.id === 'nativeProfileMapRotationSec') {
+            saveMapRotationPrefsFromForm();
+          }
           if (event.target && event.target.id === 'nativeProfileHeadingFilterPreset') {
             syncHeadingFilterFormUi();
             previewHeadingFilterFromForm();
@@ -14844,6 +15299,8 @@
       bindClickIfPresent(routeClearButton, function () {
         clearRouteVisualization(true);
         setRouteInlineInfo('-', '-');
+        // Nach dem Beenden der Route die Kamera sanft wieder flach kippen.
+        resetMapPitchFlat(true);
       });
       bindClickIfPresent(waypointButton, toggleWaypointPickMode);
       if (transportModeElement) {

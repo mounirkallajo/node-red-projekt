@@ -27,9 +27,11 @@ const cameraPanelNode = flowContent.find(function (flowNode) {
 });
 if (cameraPanelNode && fs.existsSync(cameraPanelFilePath)) {
   const cameraPanelSource = fs.readFileSync(cameraPanelFilePath, 'utf8');
-  cameraPanelNode.func = 'msg.headers = { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" };\n'
-    + 'msg.payload = `' + cameraPanelSource.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${') + '`;\n'
-    + 'return msg;';
+  // camera-panel.js ist bereits ein vollstaendiger Node-RED-Function-Body
+  // (setzt msg.headers/msg.payload und endet mit "return msg;"). Daher direkt
+  // zuweisen statt erneut einzuwickeln - sonst landet das innere "return msg;"
+  // als Top-Level im Browser-Payload (Illegal return statement).
+  cameraPanelNode.func = cameraPanelSource;
   console.log('flows.json synchronised with camera-panel.js (' + cameraPanelSource.length + ' chars)');
 }
 

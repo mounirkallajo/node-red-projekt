@@ -133,12 +133,18 @@ if(!key){
   return [msg,null,null];
 }
 const rawAction=String(body.action||'').trim();
-const action=(rawAction==='sync_saved_items'||rawAction==='syncSavedItems')?'sync_saved_items':'request_location_update';
-const requestId=String(body.requestId||((action==='sync_saved_items'?'sync':'loc')+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8)));
+const TRACKING_ACTIONS={tracking_start:1,tracking_stop:1,tracking_reset:1};
+let action;
+if(rawAction==='sync_saved_items'||rawAction==='syncSavedItems'){action='sync_saved_items';}
+else if(TRACKING_ACTIONS[rawAction]){action=rawAction;}
+else{action='request_location_update';}
+const idPrefix=action==='sync_saved_items'?'sync':(TRACKING_ACTIONS[action]?'trk':'loc');
+const requestId=String(body.requestId||(idPrefix+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,8)));
 const slash=key.indexOf('/');
 const user=topicPart(body.user||(slash>0?key.slice(0,slash):''),'mobile');
 const device=topicPart(body.device||(slash>0?key.slice(slash+1):key),'phone');
-const command={type:action==='sync_saved_items'?'mobile:command':'mobile:request-location',action:action,deviceKey:key,requestId:requestId,requestedAt:Date.now()};
+const commandType=action==='request_location_update'?'mobile:request-location':'mobile:command';
+const command={type:commandType,action:action,deviceKey:key,requestId:requestId,requestedAt:Date.now()};
 msg.payload={ok:true,data:{deviceKey:key,requestId:requestId,transport:'mqtt'}};
 return [
   msg,

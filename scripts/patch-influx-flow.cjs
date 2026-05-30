@@ -45,6 +45,10 @@ function buildInfluxGpsLineProtocol(deviceId, p) {
     if (typeof p.speed === "number" && Number.isFinite(p.speed)) fields.push("speed=" + p.speed);
     if (typeof p.heading === "number" && Number.isFinite(p.heading)) fields.push("heading=" + p.heading);
     if (typeof p.battery === "number" && Number.isFinite(p.battery)) fields.push("battery=" + Math.round(p.battery) + "i");
+    if (p.segmentId != null && String(p.segmentId) !== "") {
+        fields.push('segment_id="' + String(p.segmentId).replace(/(["\\])/g, "\\$1") + '"');
+    }
+    if (p.breakBefore === true) fields.push("break_before=true");
     return "gps_point,device_id=" + tag + " " + fields.join(",") + " " + tsNs;
 }
 function buildInfluxWriteMessage(line) {
@@ -291,6 +295,12 @@ function mapInfluxRowToPoint(row) {
         const bt = parseFloat(row.battery);
         if (Number.isFinite(bt)) o.battery = bt;
     }
+    if (row.segment_id !== undefined && row.segment_id !== "") {
+        o.segmentId = String(row.segment_id);
+    }
+    if (row.break_before !== undefined && String(row.break_before).toLowerCase() === "true") {
+        o.breakBefore = true;
+    }
     return o;
 }
 function buildFluxHistory(deviceKeyFilter) {
@@ -300,7 +310,7 @@ function buildFluxHistory(deviceKeyFilter) {
         'from(bucket: "' + bq + '")',
         '  |> range(start: -30d)',
         '  |> filter(fn: (r) => r["_measurement"] == "gps_point")',
-        '  |> filter(fn: (r) => r["_field"] == "lat" or r["_field"] == "lon" or r["_field"] == "accuracy" or r["_field"] == "speed" or r["_field"] == "heading" or r["_field"] == "battery")'
+        '  |> filter(fn: (r) => r["_field"] == "lat" or r["_field"] == "lon" or r["_field"] == "accuracy" or r["_field"] == "speed" or r["_field"] == "heading" or r["_field"] == "battery" or r["_field"] == "segment_id" or r["_field"] == "break_before")'
     ];
     if (deviceKeyFilter) {
         lines.push('  |> filter(fn: (r) => r["device_id"] == "' + escapeFluxDoubleQuotes(deviceKeyFilter) + '")');

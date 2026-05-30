@@ -91,6 +91,10 @@ function buildInfluxGpsLineProtocol(deviceId, p) {
     if (typeof p.speed === "number" && Number.isFinite(p.speed)) fields.push("speed=" + p.speed);
     if (typeof p.heading === "number" && Number.isFinite(p.heading)) fields.push("heading=" + p.heading);
     if (typeof p.battery === "number" && Number.isFinite(p.battery)) fields.push("battery=" + Math.round(p.battery) + "i");
+    if (p.segmentId != null && String(p.segmentId) !== "") {
+        fields.push('segment_id="' + String(p.segmentId).replace(/(["\\])/g, "\\$1") + '"');
+    }
+    if (p.breakBefore === true) fields.push("break_before=true");
     return "gps_point,device_id=" + tag + " " + fields.join(",") + " " + tsNs;
 }
 function buildInfluxWriteMessage(line) {
@@ -533,6 +537,7 @@ let sequenceNumber = null;
 let routePoint = false;
 let segmentId = null;
 let breakBefore = false;
+let mobileLocalTrackingFlag = null;
 const messageIsRetained = msg.retain === true || msg.retain === "true";
 const topicRoot = topicParts.length ? String(topicParts[0] || "").toLowerCase() : "";
 const payloadSource = String(p.source || "").toLowerCase();
@@ -583,6 +588,7 @@ if (isOwntracks) {
     routePoint = p.routePoint === true && p.final === true;
     segmentId = p.segmentId != null ? String(p.segmentId) : null;
     breakBefore = p.breakBefore === true;
+    if (p.localTracking !== undefined) mobileLocalTrackingFlag = p.localTracking === true;
 } else {
     const coords = p.coords && typeof p.coords === "object" ? p.coords : null;
     lat = asNumber(p.lat != null ? p.lat : p.latitude);
@@ -827,6 +833,12 @@ if (!messageIsRetained && influxWriteEnabled() && gpsFixOk && stabilizedPosition
     } else {
         influxSecondMsg = buildInfluxWriteMessage(regLine);
     }
+}
+
+if (isMobileApp && !messageIsRetained && mobileLocalTrackingFlag !== null) {
+    let localTrackingStateByDevice = global.get("localTrackingStateByDevice") || {};
+    localTrackingStateByDevice[key] = { active: mobileLocalTrackingFlag === true, updatedAt: nowAtReceive };
+    global.set("localTrackingStateByDevice", localTrackingStateByDevice);
 }
 
 global.set("history", history);

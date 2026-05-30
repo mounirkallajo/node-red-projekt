@@ -1290,10 +1290,13 @@
           resolve(null);
           return;
         }
-        const clientId = 'mobile_app_' + sanitizePart(deviceKey, 'phone').replace(/[/.]/g, '_') + '_' + Math.random().toString(16).slice(2);
+        // Stabile clientId + persistente Session (clean:false): der Broker puffert
+        // QoS1-Kommandos (tracking_start/stop/reset), falls das Handy kurz offline ist,
+        // und liefert sie beim naechsten Reconnect zuverlaessig nach.
+        const clientId = 'mobile_app_' + sanitizePart(deviceKey, 'phone').replace(/[/.]/g, '_');
         const client = global.mqtt.connect(targetUrl, {
           clientId: clientId,
-          clean: true,
+          clean: false,
           connectTimeout: 5000,
           reconnectPeriod: 0
         });
@@ -1362,6 +1365,11 @@
       }
       return true;
     }
+    if (action === 'tracking_start' || action === 'tracking_stop' || action === 'tracking_reset') {
+      // Server-Fernsteuerung: die Zustandsmaschine (inkl. Dialog) lebt in Maplogik.
+      global.dispatchEvent(new CustomEvent('capacitor-tracking-command', { detail: command || {} }));
+      return true;
+    }
     if (action !== 'request_location_update' && action !== 'requestLocation') return true;
     const latestPoint = getLastLocalPoint();
     if (latestPoint) {
@@ -1404,6 +1412,7 @@
     const topic = payload._mqttTopic || mqttTopicForDevice();
     const wirePayload = Object.assign({}, payload);
     delete wirePayload._mqttTopic;
+    wirePayload.localTracking = !!trackingActive;
     const ok = await new Promise(function (resolve) {
       client.publish(topic, JSON.stringify(wirePayload), { qos: 1, retain: false }, function (error) {
         resolve(!error);
@@ -1453,6 +1462,14 @@
     } finally {
       syncInFlight = false;
     }
+  }
+
+  function publishTrackingStatus() {
+    // Winzige, sofortige Statusmeldung: erzwungener Live-Punkt traegt localTracking.
+    if (!serverUploadEnabled) return Promise.resolve(false);
+    const point = getLastLocalPoint();
+    if (!point) return Promise.resolve(false);
+    return publishLivePointToServer(point, true).catch(function () { return false; });
   }
 
   async function sendLastLocalPointIfAvailable() {
@@ -2265,6 +2282,8 @@
     } else {
       setStatus('Live-Punkte aktiv — Tracking aus');
     }
+    publishTrackingStatus().catch(function () {});
+    return true;
   }
 
   function lonLatToTile(lon, lat, zoom) {
@@ -2585,6 +2604,7 @@
       };
     },
     setTrackingActive: setTrackingActive,
+    publishTrackingStatus: publishTrackingStatus,
     getProfileSettings: getProfileSettings,
     saveProfileSettings: saveProfileSettings,
     getHeadingFilterDebug: getHeadingFilterDebug,
