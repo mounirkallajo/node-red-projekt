@@ -1761,6 +1761,12 @@
       }
       const requestTracking = options.tracking != null ? !!options.tracking : trackingActive;
       const localOnly = options.localOnly !== false;
+      if (options.hardRefresh) {
+        // Sehr harter Refresh (Lang-Druck): Glaettungs-/Filterzustand zuruecksetzen,
+        // damit ein gestoerter/gecachter Fix nicht den neuen Fix verzerrt -> frische
+        // rohe, gefilterte GPS-Daten wie nach einem Neustart.
+        resetFilterStates();
+      }
       const firstFix = !!options.firstFix || !getLastLocalPoint();
       const sampleCount = Math.max(3, Math.min(firstFix ? 20 : 15, Math.round(num(options.samples) || (firstFix ? 20 : 12))));
       const deadline = Date.now() + Math.max(1200, Math.min(firstFix ? 15000 : 6000, Math.round(num(options.maxMs) || (firstFix ? 14000 : 3600))));

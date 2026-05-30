@@ -2136,10 +2136,14 @@
           const camera = { center: lngLat };
           if (Number.isFinite(Number(zoom))) camera.zoom = Number(zoom);
           if (options && Number.isFinite(Number(options.pitch))) camera.pitch = Number(options.pitch);
+          if (options && Number.isFinite(Number(options.bearing))) camera.bearing = -Number(options.bearing);
           const duration = options && options.animate ? numberOr(options.duration, 0.8) * 1000 : 0;
           this._flagAnimation(duration);
-          if (duration) this._native.easeTo(Object.assign(camera, { duration: duration, essential: true }));
-          else this._native.jumpTo(camera);
+          if (duration) {
+            const easeOptions = Object.assign(camera, { duration: duration, essential: true });
+            if (options && typeof options.easing === 'function') easeOptions.easing = options.easing;
+            this._native.easeTo(easeOptions);
+          } else this._native.jumpTo(camera);
           return this;
         }
         panTo(center, options) { return this.setView(center, undefined, options); }
@@ -2410,7 +2414,7 @@
     const LOCAL_SAVED_ROUTES_STORAGE_KEY = 'mapLocalSavedRoutesByDevice';
     const NAV_ROUTE_CACHE_STORAGE_KEY = 'mapNavigationRouteCache';
     const LOCATE_BUTTON_ACTIVE_MS = 400;
-    const LOCATE_FOLLOW_TOGGLE_MIN_GAP_MS = 900;
+    const LOCATE_LONG_PRESS_MS = 600;
     const MISMATCH_SUPPRESS_AFTER_START_MS = 20000;
     const LOCATION_REQUEST_POLL_INTERVAL_MS = 100;
     const LOCATION_REQUEST_WAIT_MAX_MS = 20000;
@@ -2421,6 +2425,50 @@
     const AUTO_FOLLOW_PAN_DURATION_SECONDS = 0.9;
     // Leichte Kameraneigung fuer die "Sicht nach vorne" beim Zentrieren/Navigieren.
     const MAP_DRIVE_VIEW_PITCH_DEG = 52;
+    // Mittiges Andocken: EIN durchgehender rAF-Loop (60 fps) ist die EINZIGE
+    // Kameraquelle und fuehrt Position, Bearing und Pitch pro Frame in EINEM
+    // Schreibvorgang zum Ziel. Dadurch dreht/bewegt sich die Karte kontinuierlich
+    // und interaktiv (nicht im GPS-Takt), und es gibt keinen zweiten Animator,
+    // der mit der Kamera kollidiert. Glaettungs-tau (in ms) pro Eigenschaft:
+    const LOCATE_FOLLOW_POS_SMOOTH_MS = 220;
+    const LOCATE_FOLLOW_PITCH_SMOOTH_MS = 300;
+    const LOCATE_FOLLOW_POS_SNAP_DEG = 0.0000015;
+    const LOCATE_FOLLOW_BEARING_EPS_DEG = 0.05;
+    const LOCATE_FOLLOW_PITCH_EPS_DEG = 0.1;
+    // Routenende/Navigationsrest beim Folgen nicht pro Frame neu setzen
+    // (setLatLngs projiziert die GANZE Linie neu = O(Routenlaenge)). Auf ~7 Hz
+    // drosseln; das volle Re-Render uebernimmt der Live-Render-Coalescer.
+    const LOCATE_FOLLOW_ROUTE_DOCK_MIN_MS = 150;
+    // Minimale Distanz, ab der das Routenende neu geschrieben wird (verhindert
+    // O(N)-Rewrites bei Mikro-Bewegungen, die optisch ohnehin nicht sichtbar sind).
+    const LOCATE_FOLLOW_ROUTE_DOCK_MIN_DEG = 0.0000025;
+    // Live-Render der Tracking-Linie pro GPS-Routenpunkt koaleszieren: ein voller
+    // Re-Render der gesamten Linie ist O(N log N) + GPU-Re-Upload und blockiert
+    // bei langer Route den Main-Thread. Der Follow-Loop zieht das Linien-Ende
+    // ohnehin gedrosselt an die Markerspitze nach -> Linie bleibt visuell live.
+    const LIVE_TRACKING_ROUTE_RENDER_MIN_MS = 600;
+    // SVG-Overlay-Resync bei Drehung auf ~30 Hz begrenzen (statt jeden Frame),
+    // der volle Sync auf rotateend/zoomend bleibt erhalten (scharfes Endbild).
+    const ROTATED_RENDERER_SYNC_MIN_MS = 32;
+    // Automatischer Glaettungswert (Sekunden) je nach Richtungs-Filtermodus:
+    // ruhiger Filter (kleiner smoothLevel) -> groesseres tau (weicher),
+    // responsiver Filter (grosser smoothLevel) -> kleineres tau (direkter).
+    const MAP_ROTATION_AUTO_BASE_SEC = 0.58;
+    const MAP_ROTATION_AUTO_LEVEL_STEP_SEC = 0.045;
+    const MAP_ROTATION_AUTO_MIN_SEC = 0.18;
+    const MAP_ROTATION_AUTO_MAX_SEC = 0.5;
+    // Adaptive Drehung: bei grossem Winkel-Delta (schnelle Drehung) wird tau
+    // verkuerzt, damit die Karte sofort nachzieht und der Rueckstand nie ~180°
+    // erreicht (kein Kippen in die falsche Richtung). Ruhig -> volles tau.
+    const MAP_ROTATION_ADAPT_REF_DEG = 30;
+    const MAP_ROTATION_TAU_FLOOR_RATIO = 0.4;
+    // Zentrieren aus der Ferne: Flugdauer mit Entfernung skalieren (sichtbarer, weicher Bogen)
+    // und den frischen Fix nahe der Fallback-Position nur sanft nachziehen (kein zweiter Parabel-Flug).
+    const LOCATE_FLY_MIN_DURATION_SEC = 0.9;
+    const LOCATE_FLY_MAX_DURATION_SEC = 2.2;
+    const LOCATE_FLY_FULL_SPAN_METERS = 60000;
+    const LOCATE_REFRESH_SOFT_EASE_MAX_METERS = 80;
+    const LOCATE_SOFT_EASE_DURATION_SEC = 0.5;
     const LIVE_TRACKING_WS_PATH = '/ws/live-tracking';
     const LIVE_TRACKING_RECONNECT_INITIAL_MS = 1500;
     const LIVE_TRACKING_RECONNECT_MAX_MS = 10000;
@@ -2560,8 +2608,24 @@
       };
     }
 
+    function resolveAutoMapRotationSec() {
+      // Automatischer Glaettungswert, abgeleitet aus dem Richtungs-Filtermodus
+      // (smoothLevel). Responsiverer Filter -> kleineres tau (direkter),
+      // ruhiger Filter -> groesseres tau (weicher).
+      var cfg = readHeadingFilterConfigFromStorage();
+      var level = Number(cfg.headingFilterSmoothLevel);
+      if (!Number.isFinite(level)) level = 2;
+      var sec = MAP_ROTATION_AUTO_BASE_SEC - level * MAP_ROTATION_AUTO_LEVEL_STEP_SEC;
+      return Math.min(MAP_ROTATION_AUTO_MAX_SEC, Math.max(MAP_ROTATION_AUTO_MIN_SEC, Math.round(sec * 100) / 100));
+    }
+
     function readMapRotationSmoothSec() {
+      // Automatik an -> Systemwert aus dem Filtermodus. Automatik aus ->
+      // manuell eingegebener Wert (geklemmt). In beiden Faellen dreht die Karte.
       try {
+        if (isMapRotationAutoEnabled()) {
+          return resolveAutoMapRotationSec();
+        }
         var v = Number(localStorage.getItem('gpsMapRotationSec'));
         return Number.isFinite(v) ? Math.min(5, Math.max(0.15, v)) : 0.35;
       } catch (e) {
@@ -2569,9 +2633,24 @@
       }
     }
 
+    function resolveMapRotationTauMs(absDeltaDeg, turnRateDegPerSec) {
+      // Adaptives tau relativ zur Basis-Glaettung (Filter/Auto-Feld). Bei schneller
+      // Drehung etwas kuerzer, aber nie unter 40% der Basis -> keine 360°-Spins.
+      var baseMs = readMapRotationSmoothSec() * 1000;
+      var d = Math.abs(Number(absDeltaDeg) || 0);
+      var factor = MAP_ROTATION_ADAPT_REF_DEG / Math.max(MAP_ROTATION_ADAPT_REF_DEG, d);
+      var tauMs = baseMs * Math.max(MAP_ROTATION_TAU_FLOOR_RATIO, factor);
+      var rate = Math.abs(Number(turnRateDegPerSec) || 0);
+      if (rate > 20) tauMs = Math.min(tauMs, baseMs * 0.78);
+      if (rate > 45) tauMs = Math.min(tauMs, baseMs * 0.62);
+      if (rate > 80) tauMs = Math.min(tauMs, baseMs * 0.48);
+      return Math.max(baseMs * MAP_ROTATION_TAU_FLOOR_RATIO, tauMs);
+    }
+
     function isMapRotationAutoEnabled() {
-      // Laufzeit-Auswertung der Einstellung "Kartendrehung automatisch".
-      // Haken aus = keine Drehung (nur Zoom/Folgen, Karte bleibt Nord-oben).
+      // Einstellung "Kartendrehung automatisch": waehlt NUR die Glaettung
+      // (automatischer Systemwert vs. manueller Wert). Die Karte dreht in
+      // beiden Faellen mit der Fahrtrichtung.
       try {
         return localStorage.getItem('gpsMapRotationAuto') !== '0';
       } catch (e) {
@@ -2701,6 +2780,11 @@
       failsafeRouteRequestInFlightByKey: {},
       activeSearchTarget: null,
       lastLocateClickMs: 0,
+      locatePitchDeg: 0,
+      locatePitchActive: false,
+      locateRequestInFlight: false,
+      locateFollowActive: false,
+      locateFollowTargetLatLng: null,
       selectedRouteStart: null,
       longPressMarker: null,
       placeSheetCurrentPoint: null,
@@ -3623,6 +3707,11 @@
         state.hasCenteredOnCurrentLocation = true;
         return;
       }
+      // Wenn das mittige Andocken (locate-follow) die Kamera steuert, zentriert
+      // bereits das native Follow-easeTo -> kein zweiter Pan (keine Konflikte).
+      if (locateFollowControlsMap()) {
+        return;
+      }
       if (state.autoFollowEnabled && !state.userHasInteractedWithMap) {
         followCurrentPositionOnMap(latLng, false);
       } else {
@@ -4032,6 +4121,8 @@
     function toggleDeviceViewMode() {
       state.userSelectedDeviceKey = true;
       state.pendingColdStartAllModeFit = false;
+      // Mittiges Andocken stoppen (Geraetewechsel / All-Modus).
+      cancelLocateFollowDock();
       state.showAllDevicesOnMap = !state.showAllDevicesOnMap;
       updateDeviceSwitcherUi();
       if (state.showAllDevicesOnMap) {
@@ -4629,9 +4720,14 @@
         enableHeadingUpBearingControl();
         var latLng = state.lastKnownCurrentLatLng;
         if (latLng && latLng.length >= 2) {
-          followCurrentPositionOnMap(latLng, true);
-          var eff = effectiveHeadingForDeviceDisplay(getSelectedDeviceKey(), state.latestHeadingDegrees);
-          if (eff !== null) syncMapBearingFromHeading(eff);
+          if (!state.showAllDevicesOnMap && !navigationMapDockControlsMap()) {
+            // Andocken (inkl. automatische Drehung/Verschiebung) nach der Pause fortsetzen.
+            startLocateFollowLoop();
+          } else {
+            followCurrentPositionOnMap(latLng, true);
+            var eff = effectiveHeadingForDeviceDisplay(getSelectedDeviceKey(), state.latestHeadingDegrees);
+            if (eff !== null) syncMapBearingFromHeading(eff);
+          }
         }
       }, getAutoFollowResumeDelayMs());
     }
@@ -4647,6 +4743,8 @@
       if (state.autoFollowEnabled) {
         state.autoFollowEnabled = false;
       }
+      // Mittiges Andocken sofort stoppen (Nutzer verschiebt die Karte selbst).
+      cancelLocateFollowDock();
       clearAutoFollowResumeTimer();
       disableHeadingUpBearingByUserInteraction();
       // Nach kurzer Inaktivitaet wieder folgen, falls Ortung/Tracking aktiv ist.
@@ -5120,28 +5218,29 @@
       var headingDeviceKey = selectedDeviceKey || activeDeviceKey || '';
       processNavigationRouteLiveUpdate(activePosition);
 
-      // Den currentMarker zuerst sicherstellen und DANN das Heading aktualisieren.
-      // Sonst legt updateHeadingVisualization einen separaten Heading-Marker an,
-      // weil currentMarker noch fehlt -> kurzzeitig zwei Standort-Marker.
-      if (!state.showAllDevicesOnMap) {
-        if (!state.currentMarker) {
-          var effInit = effectiveHeadingForDeviceDisplay(headingDeviceKey, normalizeHeadingDegrees(activePosition.heading));
-          state.currentMarker = L.marker(currentLatLng, {
-            icon: createCurrentPositionIcon(selectedDeviceKey || '', effInit),
-            zIndexOffset: 2000,
-            rotateWithView: facingMarkerRotateWithViewOption(),
-            rotation: 0
-          }).addTo(state.map);
-          state.currentMarker.bindPopup('Aktuelle Position');
-        } else {
-          animateCurrentMarkerTo(
-            currentLatLng,
-            activePosition.timestamp,
-            nativePhoneUsesLocalDisplayOnly(selectedDeviceKey || activeDeviceKey)
-          );
-        }
+      // Den currentMarker zuerst sicherstellen, DANN das Heading aktualisieren
+      // (sonst legt updateHeadingVisualization einen separaten Heading-Marker an
+      // -> kurzzeitig zwei Standort-Marker) und ERST DANACH verschieben. So nutzt
+      // das Follow-easeTo die frische Fahrtrichtung (kein Bearing-Versatz).
+      var hadCurrentMarker = !state.showAllDevicesOnMap && !!state.currentMarker;
+      if (!state.showAllDevicesOnMap && !state.currentMarker) {
+        var effInit = effectiveHeadingForDeviceDisplay(headingDeviceKey, normalizeHeadingDegrees(activePosition.heading));
+        state.currentMarker = L.marker(currentLatLng, {
+          icon: createCurrentPositionIcon(selectedDeviceKey || '', effInit),
+          zIndexOffset: 2000,
+          rotateWithView: facingMarkerRotateWithViewOption(),
+          rotation: 0
+        }).addTo(state.map);
+        state.currentMarker.bindPopup('Aktuelle Position');
       }
       updateHeadingVisualization(activePosition, currentLatLng);
+      if (hadCurrentMarker) {
+        animateCurrentMarkerTo(
+          currentLatLng,
+          activePosition.timestamp,
+          nativePhoneUsesLocalDisplayOnly(selectedDeviceKey || activeDeviceKey)
+        );
+      }
       state.lastKnownCurrentLatLng = [activePosition.lat, activePosition.lon];
       if (selectedDeviceKey && coordinatesArePlausibleForMap(activePosition.lat, activePosition.lon)) {
         state.lastKnownLatLngByDevice[selectedDeviceKey] = [activePosition.lat, activePosition.lon];
@@ -5225,7 +5324,7 @@
       if (!entry) return;
       updateNativeLocalPointCounters(point);
       if (point.routePoint === true && state.showLatestTrackingRouteByKey[nativeKey]) {
-        renderLatestTrackingRouteLineFromHistory(getNativeLocalRoutePoints(), null, nativeKey);
+        scheduleLatestTrackingRouteRender(nativeKey);
       }
       if (state.showAllDevicesOnMap) {
         syncPerDeviceCircleMarkers();
@@ -5644,14 +5743,24 @@
           vectorRenderer._updateTransform(ev && ev.center ? ev.center : map.getCenter(), ev && ev.zoom != null ? ev.zoom : map.getZoom());
         }
       }
+      let lastSyncMs = 0;
+      function nowMs() {
+        return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+          ? performance.now() : Date.now();
+      }
       function scheduleSync() {
         if (syncRaf) return;
-        const run = function () { syncRaf = 0; syncRenderer(); };
-        syncRaf = typeof window.requestAnimationFrame === 'function' ? window.requestAnimationFrame(run) : setTimeout(run, 0);
+        const run = function () { syncRaf = 0; lastSyncMs = nowMs(); syncRenderer(); };
+        // Waehrend einer fortlaufenden Drehung den vollen Reprojektions-Sync auf
+        // ~30 Hz begrenzen (sonst O(Routenlaenge) pro Frame = kurzes Haengen).
+        const waitMs = Math.max(0, ROTATED_RENDERER_SYNC_MIN_MS - (nowMs() - lastSyncMs));
+        syncRaf = (waitMs <= 0 && typeof window.requestAnimationFrame === 'function')
+          ? window.requestAnimationFrame(run)
+          : setTimeout(run, waitMs);
       }
-      mapInstance.on('rotateend zoomend viewreset', syncRenderer);
+      mapInstance.on('rotateend zoomend viewreset', function (ev) { lastSyncMs = nowMs(); syncRenderer(ev); });
       mapInstance.on('rotate zoom', scheduleSync);
-      mapInstance.on('zoomanim', syncRenderer);
+      mapInstance.on('zoomanim', function (ev) { lastSyncMs = nowMs(); syncRenderer(ev); });
     }
 
     function byId(id) { return document.getElementById(id); }
@@ -7668,7 +7777,7 @@
               ? bridge.requestLocationBurst
               : bridge.requestLocationNow;
             const refreshOptions = options.hardRefresh
-              ? { tracking: state.trackingEnabled, localOnly: true, samples: firstFix ? 20 : 12, maxMs: firstFix ? 14000 : 5000, firstFix: firstFix }
+              ? { tracking: state.trackingEnabled, localOnly: true, samples: firstFix ? 20 : 12, maxMs: firstFix ? 14000 : 5000, firstFix: firstFix, hardRefresh: true }
               : { tracking: state.trackingEnabled, localOnly: true };
             const refreshPromise = refreshMethod.call(bridge, refreshOptions)
               .then(function (freshPoint) {
@@ -7702,7 +7811,8 @@
         throw new Error('Lokale GPS-Bridge ist noch nicht bereit.');
       }
       const requestBody = {
-        deviceKey: selectedDeviceKey || ''
+        deviceKey: selectedDeviceKey || '',
+        hardRefresh: !!(options && options.hardRefresh)
       };
       if (deviceTarget && deviceTarget.user && deviceTarget.device) {
         requestBody.user = deviceTarget.user;
@@ -8664,8 +8774,18 @@
       return deltaDegrees;
     }
 
+    let lastHeadingTurnSign = 0;
+    let lastHeadingIncMs = 0;
+    let lastHeadingTurnRateDegPerSec = 0;
+    let mapRotationUiRefreshMs = 0;
+    let persistHeadingsTimer = 0;
+
     let pendingBearingSyncFrameId = 0;
     function scheduleBearingMarkerSync() {
+      // Follow-Loop dreht die Karte; Marker liegen in der Kartenebene (rotateWithView).
+      if (state.locateFollowActive) {
+        return;
+      }
       if (pendingBearingSyncFrameId) {
         return;
       }
@@ -8685,7 +8805,7 @@
     }
 
     function isHeadingUpBearingControlActive() {
-      return !!state.headingUpBearingEnabled && !state.showAllDevicesOnMap && isMapRotationAutoEnabled();
+      return !!state.headingUpBearingEnabled && !state.showAllDevicesOnMap;
     }
 
     function facingMarkerRotateWithViewOption() {
@@ -8698,11 +8818,8 @@
     }
 
     function enableHeadingUpBearingControl() {
-      // Nur freigeben, wenn die automatische Kartendrehung eingeschaltet ist.
-      if (!isMapRotationAutoEnabled()) {
-        state.headingUpBearingEnabled = false;
-        return;
-      }
+      // Drehung in Fahrtrichtung freigeben (Glaettung kommt aus der
+      // Einstellung auto/manuell, schaltet die Drehung aber nicht ab).
       state.headingUpBearingEnabled = true;
     }
 
@@ -8796,7 +8913,7 @@
           state.suppressMapInteractionForAutoBearing = false;
           return;
         }
-        const tauMs = readMapRotationSmoothSec() * 1000;
+        const tauMs = resolveMapRotationTauMs(signedDelta, lastHeadingTurnRateDegPerSec);
         const progress = 1 - Math.exp(-dtMs / tauMs);
         state.map.setBearing(wrapHeadingDegreesForMap(currentWrapped + signedDelta * progress));
         scheduleBearingMarkerSync();
@@ -8816,6 +8933,11 @@
       // Waehrend des Standort-Zooms keine Drehung, damit der Zoom nicht
       // durch die Bearing-Animation unterbrochen wird (Zoom zuerst, dann drehen).
       if (state.locateZoomInProgress) {
+        return;
+      }
+      // Das mittige Andocken dreht bereits pro Frame mit (kombinierter
+      // Kameraschreibvorgang) -> hier kein zweiter Bearing-Loop.
+      if (state.locateFollowActive) {
         return;
       }
       if (!isHeadingUpBearingControlActive()) {
@@ -11960,6 +12082,17 @@
       });
     }
 
+    function resolveLocateFlyBearing(headingDegrees) {
+      // Richtung fuer den Zentrier-Flug: Heading-up-Peilung des Geraets, sonst
+      // (falls Auto-Drehung aktiv) das uebergebene Heading - sonst keine Drehung.
+      let flyBearing = navigationFlyBearingOption();
+      const h = normalizeHeadingDegrees(headingDegrees);
+      if (flyBearing === undefined && h !== null) {
+        flyBearing = -h;
+      }
+      return flyBearing;
+    }
+
     function flyMapToDeviceLocationAnimated(targetLat, targetLon, headingDegrees, userInitiated) {
       if (!state.map || !Number.isFinite(targetLat) || !Number.isFinite(targetLon)) {
         return;
@@ -11970,20 +12103,27 @@
       if (headingDegrees !== undefined && headingDegrees !== null) {
         state.latestHeadingDegrees = normalizeHeadingDegrees(headingDegrees);
       }
-      // Aus der Ferne erst Nord-oben hinfliegen/zoomen; die Drehung in Fahrtrichtung
-      // erfolgt nach der Ankunft (z.B. via restoreLocateFollowAfterValidCenter).
-      let flyBearing = navigationFlyBearingOption();
-      try {
-        const currentBounds = typeof state.map.getBounds === 'function' ? state.map.getBounds() : null;
-        const targetIsFarAway = currentBounds && typeof currentBounds.contains === 'function'
-          ? !currentBounds.contains([targetLat, targetLon])
-          : false;
-        if (targetIsFarAway) flyBearing = 0;
-      } catch (boundsError) { /* Fallback: normale Peilung */ }
+      // Richtung des Standorts bereits beim Zoom sanft uebernehmen: das flyTo
+      // dreht die Karte ueber die gesamte Flugdauer langsam auf die Fahrtrichtung
+      // (kein separater Dreh-Schritt). Die automatische Drehung bleibt waehrend
+      // des Zooms gesperrt (state.locateZoomInProgress) -> keine Konflikte.
+      const flyBearing = resolveLocateFlyBearing(headingDegrees);
+      // 2D beim ersten Klick (pitch 0), 3D beim zweiten/Doppelklick (geneigt).
+      const targetPitch = Number.isFinite(state.locatePitchDeg) ? state.locatePitchDeg : 0;
+      // Flugdauer mit Entfernung skalieren: aus der Ferne wird der Zoom-Bogen
+      // sichtbar und weich (nah ~0.9 s, weit bis ~2.2 s). Richtung wird ueber die
+      // gesamte Flugdauer im selben flyTo uebernommen (eine kombinierte Bewegung).
+      const center = typeof state.map.getCenter === 'function' ? state.map.getCenter() : null;
+      const distMeters = center && typeof state.map.distance === 'function'
+        ? state.map.distance(center, L.latLng(targetLat, targetLon))
+        : 0;
+      const span = Math.max(0, Math.min(1, distMeters / LOCATE_FLY_FULL_SPAN_METERS));
+      const flyDurationSec = LOCATE_FLY_MIN_DURATION_SEC +
+        (LOCATE_FLY_MAX_DURATION_SEC - LOCATE_FLY_MIN_DURATION_SEC) * span;
       state.map.flyTo(
         [targetLat, targetLon],
         16,
-        { duration: 1.1, easeLinearity: 0.12, bearing: flyBearing, pitch: MAP_DRIVE_VIEW_PITCH_DEG }
+        { duration: flyDurationSec, easeLinearity: 0.12, bearing: flyBearing, pitch: targetPitch }
       );
       state.lastKnownCurrentLatLng = [targetLat, targetLon];
       state.hasCenteredOnCurrentLocation = true;
@@ -12088,6 +12228,8 @@
         return;
       }
       state.navigationGuidanceCompactActive = true;
+      // Mittiges Andocken der Ortung stoppen (Navigation uebernimmt die Kamera).
+      cancelLocateFollowDock();
       state.navigationGuidanceStepIndex = 0;
       state.userHasInteractedWithMap = !useLiveCurrentPosition;
       if (useLiveCurrentPosition) enableHeadingUpBearingControl();
@@ -13010,8 +13152,19 @@
       const routeLatLngs = routeLine.getLatLngs();
       if (!Array.isArray(routeLatLngs) || routeLatLngs.length === 0) return;
       const lastEntry = routeLatLngs[routeLatLngs.length - 1];
-      if (Array.isArray(lastEntry)) {
-        if (!lastEntry.length) return;
+      const isSegmented = Array.isArray(lastEntry);
+      const tail = isSegmented
+        ? (lastEntry.length ? lastEntry[lastEntry.length - 1] : null)
+        : lastEntry;
+      if (isSegmented && !lastEntry.length) return;
+      // Mikro-Bewegungen ignorieren (kein O(N) setLatLngs + GPU-Re-Upload, wenn
+      // sich das Linien-Ende optisch nicht aendert).
+      if (tail && Number.isFinite(tail.lat) && Number.isFinite(tail.lng) &&
+        Math.abs(tail.lat - lat) < LOCATE_FOLLOW_ROUTE_DOCK_MIN_DEG &&
+        Math.abs(tail.lng - lon) < LOCATE_FOLLOW_ROUTE_DOCK_MIN_DEG) {
+        return;
+      }
+      if (isSegmented) {
         lastEntry[lastEntry.length - 1] = L.latLng(lat, lon);
       } else {
         routeLatLngs[routeLatLngs.length - 1] = L.latLng(lat, lon);
@@ -13147,6 +13300,22 @@
       return grouped
         .map(function (segmentPoints) { return buildCleanRouteCoordinates(segmentPoints); })
         .filter(function (segmentCoords) { return segmentCoords.length > 0; });
+    }
+
+    const pendingLatestTrackingRouteRenderTimers = {};
+    function scheduleLatestTrackingRouteRender(deviceKey) {
+      // Trailing-edge Throttle: ein einziger voller Re-Render pro Geraet im Takt
+      // von LIVE_TRACKING_ROUTE_RENDER_MIN_MS. Verhindert O(N log N) + GPU-Re-Upload
+      // pro GPS-Tick bei langer Route -> Smoothing/Drehung bleiben flüssig.
+      if (!deviceKey || pendingLatestTrackingRouteRenderTimers[deviceKey]) return;
+      pendingLatestTrackingRouteRenderTimers[deviceKey] = setTimeout(function () {
+        delete pendingLatestTrackingRouteRenderTimers[deviceKey];
+        if (!state.showLatestTrackingRouteByKey[deviceKey]) return;
+        const isLocal = isNativeAppContext() && isNativePhoneDeviceKey(deviceKey);
+        const points = isLocal ? getNativeLocalRoutePoints() : null;
+        if (!Array.isArray(points)) return;
+        renderLatestTrackingRouteLineFromHistory(points, null, deviceKey);
+      }, LIVE_TRACKING_ROUTE_RENDER_MIN_MS);
     }
 
     function renderLatestTrackingRouteLineFromHistory(pointEntries, trackingStartPosition, deviceKey) {
@@ -13727,6 +13896,7 @@
         } catch (mapStopError) {}
       }
       cancelMapBearingAnimation();
+      cancelLocateFollowDock();
       clearNavigationAdaptiveZoomTimer();
       state.autoFollowEnabled = false;
       state.navigationAutoViewEnabled = false;
@@ -13755,13 +13925,19 @@
       state.autoFollowResumeArmed = true;
       clearAutoFollowResumeTimer();
       enableHeadingUpBearingControl();
-      const heading = normalizeHeadingDegrees(markerPosition && markerPosition.heading);
-      if (heading !== null) {
-        syncMapBearingFromHeading(heading);
+      if (markerPosition) {
+        const heading = normalizeHeadingDegrees(markerPosition.heading);
+        if (heading !== null) {
+          state.latestHeadingDegrees = heading;
+        }
       }
+      // Mittiges Andocken + automatische Drehung/Verschiebung aktivieren: ab jetzt
+      // haelt der Follow-Loop den Marker zentriert und dreht in Fahrtrichtung
+      // (Center + Bearing + Pitch in EINEM Schreibvorgang pro Frame).
+      startLocateFollowLoop();
     }
 
-    function centerMapOnPositionEntryNow(positionEntry, selectedDeviceKey) {
+    function centerMapOnPositionEntryNow(positionEntry, selectedDeviceKey, softEase) {
       if (!positionEntry) return false;
       const markerPosition = preparePositionEntryForMapDisplay(positionEntry) || positionEntry;
       if (!markerPosition || typeof markerPosition.lat !== 'number' || typeof markerPosition.lon !== 'number') {
@@ -13774,32 +13950,347 @@
       }
       // Zoom-Phase markieren: bis zum Abschluss des flyTo wird nicht gedreht.
       state.locateZoomInProgress = true;
+      // Verhindert den fruehen setView-Snap (und damit ein vorzeitiges 'moveend',
+      // das die Drehung/Verfolgung startet, bevor der Zoom abgeschlossen ist).
+      state.hasCenteredOnCurrentLocation = true;
       applyLivePositionEntryToMap(markerPosition);
-      flyMapToDeviceLocationAnimated(markerPosition.lat, markerPosition.lon, markerPosition.heading, true);
+      if (softEase === true) {
+        // Frischer Fix nahe der bereits angeflogenen Fallback-Position: keinen
+        // zweiten Parabel-Flug starten. Laeuft noch der erste Flug, nicht
+        // unterbrechen (der Follow-Loop zieht den Marker danach mittig nach);
+        // sonst nur kurz kombiniert nachziehen (Center + Bearing + Pitch).
+        if (!state.map._animatingZoom) {
+          const flyBearing = resolveLocateFlyBearing(markerPosition.heading);
+          const targetPitch = Number.isFinite(state.locatePitchDeg) ? state.locatePitchDeg : 0;
+          state.map.setView(L.latLng(markerPosition.lat, markerPosition.lon), 16, {
+            animate: true,
+            duration: LOCATE_SOFT_EASE_DURATION_SEC,
+            pitch: targetPitch,
+            bearing: flyBearing
+          });
+          state.lastKnownCurrentLatLng = [markerPosition.lat, markerPosition.lon];
+          state.hasCenteredOnCurrentLocation = true;
+        }
+      } else {
+        flyMapToDeviceLocationAnimated(markerPosition.lat, markerPosition.lon, markerPosition.heading, true);
+      }
       return true;
     }
 
-    async function centerOnCurrentLocation() {
-      const locateToggleButton = byId('locateToggleBtn');
-      // Zweiter Klick waehrend aktivem Folgen beendet das Folgen (freies Bewegen).
-      if (state.autoFollowResumeArmed && state.autoFollowEnabled &&
-        (Date.now() - (state.lastLocateClickMs || 0) >= LOCATE_FOLLOW_TOGGLE_MIN_GAP_MS)) {
-        state.autoFollowResumeArmed = false;
-        state.autoFollowEnabled = false;
-        clearAutoFollowResumeTimer();
-        disableHeadingUpBearingByUserInteraction();
-        state.lastLocateClickMs = Date.now();
-        if (locateToggleButton) locateToggleButton.classList.remove('active');
+    function tiltFollowCameraTo(pitchDeg) {
+      // Neigt die Kamera (2D <-> 3D) ohne neue GPS-Anforderung. Das native
+      // Follow-easeTo übernimmt den Pitch und hält den Standort mittig.
+      if (!state.map || !state.lastKnownCurrentLatLng) {
         return;
       }
-      if (locateToggleButton) {
-        locateToggleButton.classList.add('active');
+      state.locatePitchDeg = Number.isFinite(pitchDeg) ? pitchDeg : 0;
+      state.autoFollowEnabled = true;
+      state.autoFollowResumeArmed = true;
+      state.userHasInteractedWithMap = false;
+      enableHeadingUpBearingControl();
+      startLocateFollowLoop();
+    }
+
+    let locateFollowFrameId = 0;
+    let locateFollowLastFrameMs = 0;
+    let locateFollowLastRouteDockMs = 0;
+    // Geglaettetes Map-Bearing (Wrapper-Domaene): folgt dem gefilterten Heading
+    // per kuerzestem Weg mit adaptivem tau. Kein Unwrapped/Long-Path (verursachte
+    // 360°-Spins). Bei Filter-Lag waehrend schneller Drehung kurz halten.
+    let locateFollowMapBearingSmoothed = null;
+    let locateFollowRenderLatLng = null;
+
+    function stepFollowMapBearing(dtMs, frameTimeMs) {
+      if (!isHeadingUpBearingControlActive()) {
+        return false;
       }
+      const eff = state.latestHeadingDegrees;
+      if (eff == null || !Number.isFinite(eff)) {
+        return false;
+      }
+      const target = wrapHeadingDegreesForMap(-eff);
+      if (!Number.isFinite(locateFollowMapBearingSmoothed)) {
+        locateFollowMapBearingSmoothed = wrapHeadingDegreesForMap(getCurrentMapBearingDegrees());
+      }
+      if (lastHeadingIncMs && frameTimeMs - lastHeadingIncMs > 600) {
+        lastHeadingTurnRateDegPerSec = 0;
+      }
+      let delta = shortestSignedBearingDeltaDegrees(locateFollowMapBearingSmoothed, target);
+      let step;
+      const tauMs = resolveMapRotationTauMs(Math.abs(delta), lastHeadingTurnRateDegPerSec);
+      // Filter hinter schneller Drehung: nicht 360° drehen, sondern langsam in
+      // bekannter Drehrichtung weiter bis gefiltertes Heading nachzieht.
+      if (lastHeadingTurnSign && Math.abs(delta) > 55 &&
+        (delta > 0 ? 1 : -1) !== lastHeadingTurnSign) {
+        const rateStep = Math.min(5, Math.max(1, lastHeadingTurnRateDegPerSec * dtMs / 1000));
+        step = lastHeadingTurnSign * rateStep * (1 - Math.exp(-dtMs / tauMs));
+      } else {
+        if (!lastHeadingTurnSign && lastHeadingTurnRateDegPerSec < 4 && Math.abs(delta) < 2.5) {
+          return false;
+        }
+        step = delta * (1 - Math.exp(-dtMs / tauMs));
+      }
+      const maxStepDeg = Math.max(1.5, 360 * dtMs / Math.max(tauMs, 1));
+      if (Math.abs(step) > maxStepDeg) {
+        step = (step > 0 ? 1 : -1) * maxStepDeg;
+      }
+      if (Math.abs(step) < LOCATE_FOLLOW_BEARING_EPS_DEG) {
+        return false;
+      }
+      locateFollowMapBearingSmoothed = wrapHeadingDegreesForMap(locateFollowMapBearingSmoothed + step);
+      return true;
+    }
+
+    function locateFollowControlsMap() {
+      return state.locateFollowActive &&
+        state.autoFollowEnabled &&
+        !state.userHasInteractedWithMap &&
+        !state.showAllDevicesOnMap &&
+        !navigationMapDockControlsMap() &&
+        !state.locateZoomInProgress;
+    }
+
+    function cancelLocateFollowDock() {
+      state.locateFollowActive = false;
+      state.locateFollowTargetLatLng = null;
+      locateFollowRenderLatLng = null;
+      locateFollowMapBearingSmoothed = null;
+      locateFollowLastFrameMs = 0;
+      locateFollowLastRouteDockMs = 0;
+      lastHeadingTurnSign = 0;
+      lastHeadingIncMs = 0;
+      lastHeadingTurnRateDegPerSec = 0;
+      if (locateFollowFrameId) {
+        cancelAnimationFrame(locateFollowFrameId);
+        locateFollowFrameId = 0;
+      }
+    }
+
+    function setLocateFollowTarget(latLng) {
+      // Neues GPS-Ziel an den Follow-Loop uebergeben (einzige Bewegungsquelle).
+      if (!Array.isArray(latLng)) {
+        return;
+      }
+      const lat = Number(latLng[0]);
+      const lng = Number(latLng[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return;
+      }
+      state.locateFollowTargetLatLng = [lat, lng];
+      if (!Array.isArray(locateFollowRenderLatLng)) {
+        locateFollowRenderLatLng = [lat, lng];
+      }
+    }
+
+    function startLocateFollowLoop() {
+      // Startet den durchgehenden Kamera-Loop. Render-Position/-Bearing aus dem
+      // aktuellen Zustand uebernehmen, damit der Loop ohne Sprung weiterlaeuft.
+      state.locateFollowActive = true;
+      if (state.currentMarkerAnimationFrame) {
+        cancelAnimationFrame(state.currentMarkerAnimationFrame);
+        state.currentMarkerAnimationFrame = null;
+      }
+      let baseLatLng = null;
+      if (state.currentMarker && typeof state.currentMarker.getLatLng === 'function') {
+        const cur = state.currentMarker.getLatLng();
+        if (cur && Number.isFinite(cur.lat) && Number.isFinite(cur.lng)) {
+          baseLatLng = [cur.lat, cur.lng];
+        }
+      }
+      if (!baseLatLng && Array.isArray(state.lastKnownCurrentLatLng)) {
+        baseLatLng = [Number(state.lastKnownCurrentLatLng[0]), Number(state.lastKnownCurrentLatLng[1])];
+      }
+      if (baseLatLng && Number.isFinite(baseLatLng[0]) && Number.isFinite(baseLatLng[1])) {
+        locateFollowRenderLatLng = [baseLatLng[0], baseLatLng[1]];
+        if (!Array.isArray(state.locateFollowTargetLatLng)) {
+          state.locateFollowTargetLatLng = [baseLatLng[0], baseLatLng[1]];
+        }
+      }
+      if (!Number.isFinite(locateFollowMapBearingSmoothed)) {
+        locateFollowMapBearingSmoothed = wrapHeadingDegreesForMap(getCurrentMapBearingDegrees());
+      }
+      locateFollowLastFrameMs = 0;
+      locateFollowLastRouteDockMs = 0;
+      if (!locateFollowFrameId && typeof window !== 'undefined' &&
+        typeof window.requestAnimationFrame === 'function') {
+        locateFollowFrameId = window.requestAnimationFrame(locateFollowFrame);
+      }
+    }
+
+    function locateFollowFrame(frameTimeMs) {
+      locateFollowFrameId = 0;
+      if (!locateFollowControlsMap()) {
+        locateFollowLastFrameMs = 0;
+        return;
+      }
+      applyLocateFollowCameraFrame(frameTimeMs);
+      locateFollowFrameId = window.requestAnimationFrame(locateFollowFrame);
+    }
+
+    function applyLocateFollowCameraFrame(frameTimeMs) {
+      if (!state.map || typeof state.map.setView !== 'function') {
+        return;
+      }
+      let goalLat = null;
+      let goalLng = null;
+      if (Array.isArray(state.locateFollowTargetLatLng)) {
+        goalLat = Number(state.locateFollowTargetLatLng[0]);
+        goalLng = Number(state.locateFollowTargetLatLng[1]);
+      }
+      if ((!Number.isFinite(goalLat) || !Number.isFinite(goalLng)) && Array.isArray(state.lastKnownCurrentLatLng)) {
+        goalLat = Number(state.lastKnownCurrentLatLng[0]);
+        goalLng = Number(state.lastKnownCurrentLatLng[1]);
+      }
+      if (!Number.isFinite(goalLat) || !Number.isFinite(goalLng)) {
+        return;
+      }
+      const dtMs = Math.max(1, Math.min(64, frameTimeMs - (locateFollowLastFrameMs || frameTimeMs)));
+      locateFollowLastFrameMs = frameTimeMs;
+
+      // Position exponentiell zum Ziel fuehren (eine durchgehende Bewegung).
+      if (!Array.isArray(locateFollowRenderLatLng)) {
+        locateFollowRenderLatLng = [goalLat, goalLng];
+      }
+      const prevLat = locateFollowRenderLatLng[0];
+      const prevLng = locateFollowRenderLatLng[1];
+      const posFactor = 1 - Math.exp(-dtMs / LOCATE_FOLLOW_POS_SMOOTH_MS);
+      let renderLat = prevLat + (goalLat - prevLat) * posFactor;
+      let renderLng = prevLng + (goalLng - prevLng) * posFactor;
+      if (Math.abs(goalLat - renderLat) < LOCATE_FOLLOW_POS_SNAP_DEG &&
+        Math.abs(goalLng - renderLng) < LOCATE_FOLLOW_POS_SNAP_DEG) {
+        renderLat = goalLat;
+        renderLng = goalLng;
+      }
+      const positionMoved = Math.abs(renderLat - prevLat) > LOCATE_FOLLOW_POS_SNAP_DEG ||
+        Math.abs(renderLng - prevLng) > LOCATE_FOLLOW_POS_SNAP_DEG;
+      locateFollowRenderLatLng = [renderLat, renderLng];
+
+      const bearingMoved = stepFollowMapBearing(dtMs, frameTimeMs);
+      const nextBearing = wrapHeadingDegreesForMap(
+        Number.isFinite(locateFollowMapBearingSmoothed)
+          ? locateFollowMapBearingSmoothed
+          : getCurrentMapBearingDegrees());
+
+      // Pitch (2D <-> 3D) sanft angleichen.
+      const currentPitch = typeof state.map.getPitch === 'function' ? state.map.getPitch() : 0;
+      const targetPitch = Number.isFinite(state.locatePitchDeg) ? state.locatePitchDeg : 0;
+      const nextPitch = currentPitch + (targetPitch - currentPitch) * (1 - Math.exp(-dtMs / LOCATE_FOLLOW_PITCH_SMOOTH_MS));
+      const pitchMoved = Math.abs(targetPitch - currentPitch) > LOCATE_FOLLOW_PITCH_EPS_DEG;
+
+      if (!positionMoved && !bearingMoved && !pitchMoved) {
+        return;
+      }
+
+      // EIN kombinierter Kameraschreibvorgang (Center + Bearing + Pitch).
+      state.suppressMapInteractionForAutoBearing = true;
+      state.map.setView(L.latLng(renderLat, renderLng), undefined, {
+        animate: false,
+        pitch: nextPitch,
+        bearing: nextBearing
+      });
+      state.suppressMapInteractionForAutoBearing = false;
+
+      // Marker exakt an die (gerade gesetzte) Kamera-Mitte kleben -> synchron mit
+      // dem GL-Canvas, kein Frame-Versatz/Zittern gegenueber der Karte.
+      const center = typeof state.map.getCenter === 'function' ? state.map.getCenter() : null;
+      const markerLat = center && Number.isFinite(center.lat) ? center.lat : renderLat;
+      const markerLng = center && Number.isFinite(center.lng) ? center.lng : renderLng;
+      if (state.currentMarker && typeof state.currentMarker.setLatLng === 'function') {
+        state.currentMarker.setLatLng([markerLat, markerLng]);
+      }
+      if (state.currentHeadingMarker && typeof state.currentHeadingMarker.setLatLng === 'function') {
+        state.currentHeadingMarker.setLatLng([markerLat, markerLng]);
+      }
+
+      if (positionMoved && frameTimeMs - locateFollowLastRouteDockMs >= LOCATE_FOLLOW_ROUTE_DOCK_MIN_MS) {
+        locateFollowLastRouteDockMs = frameTimeMs;
+        dockLatestTrackingRouteEndToLatLng(markerLat, markerLng);
+        updateNavigationRouteRemainingForLatLng(markerLat, markerLng);
+      }
+    }
+
+    function bindLocateHardRefreshLongPress(button) {
+      // Langer Druck auf den Ortungs-Button -> sehr harter Refresh (frischer,
+      // ungecachter GPS-Fix). Auf der Webseite loest dies den Hard-Refresh am
+      // Handy aus (siehe requestOwnAppLocation/Server-Kommando). Kurzer Druck
+      // bleibt der normale Klick (zentrieren/folgen).
+      if (!button || button.__locateLongPressBound) {
+        return;
+      }
+      button.__locateLongPressBound = true;
+      let pressTimer = null;
+      let longFired = false;
+      const startPress = function () {
+        longFired = false;
+        clearTimeout(pressTimer);
+        pressTimer = setTimeout(function () {
+          longFired = true;
+          centerOnCurrentLocation({ hardRefresh: true }).catch(function (error) {
+            console.warn('Standort Hard-Refresh:', error);
+          });
+        }, LOCATE_LONG_PRESS_MS);
+      };
+      const cancelPress = function () { clearTimeout(pressTimer); pressTimer = null; };
+      button.addEventListener('pointerdown', startPress);
+      button.addEventListener('pointerup', cancelPress);
+      button.addEventListener('pointerleave', cancelPress);
+      button.addEventListener('pointercancel', cancelPress);
+      // Den auf den Long-Press folgenden Klick unterdruecken (sonst doppelte Ortung).
+      button.addEventListener('click', function (clickEvent) {
+        if (longFired) {
+          clickEvent.preventDefault();
+          clickEvent.stopImmediatePropagation();
+          longFired = false;
+        }
+      }, true);
+    }
+
+    async function centerOnCurrentLocation(triggerOptions) {
+      const locateToggleButton = byId('locateToggleBtn');
+      // Hard-Refresh wird ausschliesslich per Lang-Druck ausgeloest. Ein normaler
+      // Klick darf nie einen Hard-Refresh anfordern und das Symbol bei Lang-Druck
+      // nicht markieren.
+      const fromLongPress = !!(triggerOptions && triggerOptions.hardRefresh);
+      const hardRefresh = fromLongPress;
+      const markButtonActive = function () {
+        if (fromLongPress || !locateToggleButton) return;
+        locateToggleButton.classList.add('active');
+      };
+      // Klick waehrend laufender Ortung -> 3D als Ziel merken (kein Neigen auf eine
+      // evtl. veraltete Position). Die laufende Zentrierung landet so in 3D auf dem
+      // echten Standort; nach dem Zoom uebernimmt der Follow-Loop das Andocken.
+      if (state.locateRequestInFlight) {
+        state.locatePitchActive = true;
+        state.locatePitchDeg = MAP_DRIVE_VIEW_PITCH_DEG;
+        return;
+      }
+      // Folgt die Karte bereits, schaltet ein bewusster Folgeklick zwischen 2D und
+      // 3D um (ohne neue GPS-Anforderung) -> spart Daten, keine Konflikte.
+      const alreadyFollowing = state.autoFollowEnabled && state.autoFollowResumeArmed &&
+        !state.userHasInteractedWithMap;
+      if (alreadyFollowing && !hardRefresh && state.lastKnownCurrentLatLng) {
+        state.locatePitchActive = !state.locatePitchActive;
+        state.locatePitchDeg = state.locatePitchActive ? MAP_DRIVE_VIEW_PITCH_DEG : 0;
+        tiltFollowCameraTo(state.locatePitchDeg);
+        markButtonActive();
+        if (locateToggleButton && !fromLongPress) {
+          setTimeout(function () { locateToggleButton.classList.remove('active'); }, LOCATE_BUTTON_ACTIVE_MS);
+        }
+        return;
+      }
+      // Frischer Klick -> 2D (flach). Die Drehung wird sanft im Zoom uebernommen.
+      // Ein Lang-Druck behaelt den aktuellen 2D/3D-Modus bei.
+      if (!fromLongPress) {
+        state.locatePitchActive = false;
+        state.locatePitchDeg = 0;
+      } else {
+        state.locatePitchDeg = state.locatePitchActive ? MAP_DRIVE_VIEW_PITCH_DEG : 0;
+      }
+      markButtonActive();
       stopManualLocateCameraMotion();
       state.userHasInteractedWithMap = false;
-      const locateClickMs = Date.now();
-      const hardRefresh = locateClickMs - (state.lastLocateClickMs || 0) < 900;
-      state.lastLocateClickMs = locateClickMs;
+      state.lastLocateClickMs = Date.now();
+      state.locateRequestInFlight = true;
       const nativeLocateKey = isNativeAppContext() ? getNativePhoneDeviceKey() : '';
       // Nur als Default auf das eigene Handy zentrieren. Hat der Nutzer in der
       // Geraeteliste bewusst ein anderes Geraet gewaehlt, bleibt dieses ausgewaehlt
@@ -13870,7 +14361,7 @@
         }
         try {
           const requestResult = await requestOwnAppLocation(requestTarget, {
-            hardRefresh: hardRefresh || !hasPriorCoordinates,
+            hardRefresh: hardRefresh,
             firstFix: !hasPriorCoordinates
           });
           const localPoint = requestResult && requestResult.data ? requestResult.data.point : null;
@@ -13917,8 +14408,17 @@
         if (!nativeSelectedDevice) triggerLiveTrackingUpdate();
         const markerPosition = preparePositionEntryForMapDisplay(currentPosition) || currentPosition;
         focusSelectedDeviceAfterValidLocate(selectedDeviceKey, startedFromAllMode);
+        // Ist der frische Fix nahe der bereits angeflogenen Fallback-Position, nur
+        // sanft nachziehen -> der Fallback-Flug bleibt die eine sichtbare Bewegung.
+        const softEase = !!centeredFallbackPosition &&
+          haversineKilometers(
+            centeredFallbackPosition.lat,
+            centeredFallbackPosition.lon,
+            markerPosition.lat,
+            markerPosition.lon
+          ) * 1000 <= LOCATE_REFRESH_SOFT_EASE_MAX_METERS;
         const finalCenterDone = waitForMapMoveEnd(1800);
-        if (!centerMapOnPositionEntryNow(markerPosition, selectedDeviceKey)) {
+        if (!centerMapOnPositionEntryNow(markerPosition, selectedDeviceKey, softEase)) {
           throw new Error('Der lokale GPS-Fix enthaelt keine gueltige Kartenposition.');
         }
         await finalCenterDone;
@@ -13926,6 +14426,7 @@
       } finally {
         // Zoom-Schutz auf jeden Fall wieder loesen (auch bei Fehler/Abbruch).
         state.locateZoomInProgress = false;
+        state.locateRequestInFlight = false;
         hideLocateLoadingBadge();
         if (locateToggleButton) {
           setTimeout(function () { locateToggleButton.classList.remove('active'); }, LOCATE_BUTTON_ACTIVE_MS);
@@ -13976,7 +14477,11 @@
         const cachedPoint = bridge.getLastLocalPoint();
         if (cachedPoint) applyNativeLocalGpsPoint(cachedPoint);
       }
-      bridge.requestLocationNow({ tracking: state.trackingEnabled })
+      const hardRefresh = !!(message && message.hardRefresh);
+      const locatePromise = hardRefresh && typeof bridge.requestLocationBurst === 'function'
+        ? bridge.requestLocationBurst({ tracking: state.trackingEnabled, localOnly: true, samples: 16, maxMs: 8000, firstFix: true, hardRefresh: true })
+        : bridge.requestLocationNow({ tracking: state.trackingEnabled });
+      locatePromise
         .then(function (point) {
           if (point) applyNativeLocalGpsPoint(point);
         })
@@ -14105,14 +14610,18 @@
     }
 
     function persistLastHeadingsToStorage() {
-      try {
-        localStorage.setItem(
-          LAST_HEADING_BY_DEVICE_STORAGE_KEY,
-          JSON.stringify(state.lastHeadingDegreesByDeviceKey)
-        );
-      } catch (storageWriteError) {
-        console.warn('Konnte Karten-Richtungen nicht speichern:', storageWriteError);
-      }
+      if (persistHeadingsTimer) return;
+      persistHeadingsTimer = setTimeout(function () {
+        persistHeadingsTimer = 0;
+        try {
+          localStorage.setItem(
+            LAST_HEADING_BY_DEVICE_STORAGE_KEY,
+            JSON.stringify(state.lastHeadingDegreesByDeviceKey)
+          );
+        } catch (storageWriteError) {
+          console.warn('Konnte Karten-Richtungen nicht speichern:', storageWriteError);
+        }
+      }, 400);
     }
 
     function rememberHeadingForDeviceKey(deviceKey, normalizedHeading) {
@@ -14124,13 +14633,20 @@
         : null;
       if (previous !== null) {
         const delta = ((normalizedHeading - previous + 540) % 360) - 180;
+        if (Math.abs(delta) >= 3) {
+          lastHeadingTurnSign = delta > 0 ? 1 : -1;
+          const nowMs = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+            ? performance.now() : Date.now();
+          if (lastHeadingIncMs) {
+            lastHeadingTurnRateDegPerSec = Math.abs(delta) / Math.max(1, nowMs - lastHeadingIncMs) * 1000;
+          }
+          lastHeadingIncMs = nowMs;
+        }
         const absDelta = Math.abs(delta);
         const mapFilter = getMapHeadingFilterLimits();
         let step;
         if (absDelta > mapFilter.spikeRejectDeg) {
-          // Spitze NICHT verwerfen (sonst friert die Richtung ein), sondern
-          // begrenzt nachziehen, damit die Fahrtrichtung lebendig bleibt.
-          const clampStepDeg = Math.max(6, mapFilter.spikeRejectDeg * 0.5);
+          const clampStepDeg = Math.max(28, mapFilter.spikeRejectDeg * 0.85);
           step = (delta < 0 ? -1 : 1) * Math.min(absDelta, clampStepDeg);
         } else {
           const smoothAlpha = absDelta > mapFilter.largeJumpSoftDeg
@@ -14145,13 +14661,10 @@
     }
 
     function effectiveHeadingForDeviceDisplay(deviceKey, normalizedHeading) {
-      if (normalizedHeading !== null) {
-        return normalizedHeading;
-      }
       if (deviceKey && typeof state.lastHeadingDegreesByDeviceKey[deviceKey] === 'number') {
         return state.lastHeadingDegreesByDeviceKey[deviceKey];
       }
-      return null;
+      return normalizedHeading !== null ? normalizedHeading : null;
     }
 
     function updateHeadingVisualization(positionEntry, currentLatLng) {
@@ -14161,16 +14674,14 @@
       const dk = getSelectedDeviceKey() || (positionEntry && positionEntry.key) || '';
       const nh = normalizeHeadingDegrees(positionEntry && positionEntry.heading);
       let eff;
-      // Auch fuer das Handy die frische (fusionierte, bewegungsbasierte) Peilung
-      // einbeziehen: ein gueltiges Bewegungs-Heading darf nie durch eine
-      // veraltete gespeicherte Richtung ersetzt werden -> kein Einfrieren.
       if (nh !== null) {
         rememberHeadingForDeviceKey(dk, nh);
-        eff = effectiveHeadingForDeviceDisplay(dk, nh);
-      } else {
-        eff = effectiveHeadingForDeviceDisplay(dk, null);
       }
-      if (eff != null) state.latestHeadingDegrees = eff;
+      eff = effectiveHeadingForDeviceDisplay(dk, nh);
+      if (eff != null) {
+        state.latestHeadingDegrees = eff;
+        refreshMapRotationAutoFieldIfOpen();
+      }
 
       try {
         if (eff === null) {
@@ -14224,7 +14735,9 @@
         }
       } finally {
         syncMapBearingFromHeading(eff);
-        performBearingSyncNow();
+        if (!state.locateFollowActive) {
+          performBearingSyncNow();
+        }
       }
     }
 
@@ -14327,6 +14840,14 @@
           false,
           pointTimestamp
         );
+        return;
+      }
+      // Beim mittigen Andocken besitzt der Follow-Loop die Bewegung: er zieht
+      // Marker UND Kamera in EINER geglaetteten Bewegung zum Ziel. Hier wird
+      // daher KEINE zweite Marker-Animation gestartet (sonst zwei Quellen ->
+      // Frame-Versatz, Ruckeln, haengende Drehung). Nur das Ziel uebergeben.
+      if (locateFollowControlsMap()) {
+        setLocateFollowTarget(nextLatLng);
         return;
       }
       animateMapDeviceMarkerTo(
@@ -14633,10 +15154,18 @@
       var autoEl = byId('nativeProfileMapRotationAuto');
       var secEl = byId('nativeProfileMapRotationSec');
       if (!autoEl || !secEl) return;
-      // Automatik an -> Feld gesperrt (grau) und zeigt den automatischen Wert.
-      // Automatik aus -> manuelle Eingabe erlaubt.
       secEl.disabled = autoEl.checked;
-      if (autoEl.checked) secEl.value = String(readMapRotationSmoothSec());
+      if (autoEl.checked) {
+        secEl.value = String(readMapRotationSmoothSec());
+      }
+    }
+
+    function refreshMapRotationAutoFieldIfOpen(frameTimeMs) {
+      var autoEl = byId('nativeProfileMapRotationAuto');
+      if (!autoEl || !autoEl.checked) return;
+      if (frameTimeMs && frameTimeMs - mapRotationUiRefreshMs < 500) return;
+      if (frameTimeMs) mapRotationUiRefreshMs = frameTimeMs;
+      syncMapRotationFormUi();
     }
 
     function readNativeProfileHeadingFilterFromForm() {
@@ -14673,6 +15202,7 @@
       fieldsEl.classList.toggle('native-profile-filter-fields-disabled', !isCustom);
       if (!isCustom) applyHeadingFilterPresetToForm(presetEl.value);
       markNativeProfileRanges();
+      syncMapRotationFormUi();
     }
 
     function saveHeadingFilterPrefsFromForm() {
@@ -14769,22 +15299,13 @@
 
     function applyMapRotationAutoRuntimeState() {
       if (!state.map) return;
-      if (isMapRotationAutoEnabled()) {
-        // Drehung wieder freigeben und in aktuelle Fahrtrichtung drehen.
-        if (state.autoFollowEnabled && !state.userHasInteractedWithMap) {
-          enableHeadingUpBearingControl();
-          var eff = effectiveHeadingForDeviceDisplay(getSelectedDeviceKey(), state.latestHeadingDegrees);
-          if (eff !== null) syncMapBearingFromHeading(eff);
-        }
-      } else {
-        // Drehung aus: Karte sofort Nord-oben stellen.
-        state.headingUpBearingEnabled = false;
-        cancelMapBearingAnimation();
-        setProgrammaticMapBearingImmediate(0);
-        var dk = getSelectedDeviceKey();
-        if (state.currentMarker && typeof state.currentMarker.setIcon === 'function') {
-          updateCurrentPositionIcon(state.currentMarker, dk, effectiveHeadingForDeviceDisplay(dk, state.latestHeadingDegrees));
-        }
+      // Drehung ist in beiden Modi (auto/manuell) aktiv - es unterscheidet sich
+      // nur die Glaettung (wird live aus readMapRotationSmoothSec gelesen). Hier
+      // nur die aktuelle Fahrtrichtung uebernehmen, wenn gefolgt wird.
+      if (state.autoFollowEnabled && !state.userHasInteractedWithMap) {
+        enableHeadingUpBearingControl();
+        var eff = effectiveHeadingForDeviceDisplay(getSelectedDeviceKey(), state.latestHeadingDegrees);
+        if (eff !== null) syncMapBearingFromHeading(eff);
       }
     }
 
@@ -15100,6 +15621,8 @@
           if (event.target && event.target.id === 'nativeProfileHeadingFilterPreset') {
             syncHeadingFilterFormUi();
             previewHeadingFilterFromForm();
+            // Auto-Glaettung haengt vom Filtermodus ab -> grauen Wert auffrischen.
+            syncMapRotationFormUi();
           }
           if (event.target && event.target.id && event.target.id.indexOf('nativeProfileHeadingFilter') === 0 &&
             event.target.id !== 'nativeProfileHeadingFilterPreset' &&
@@ -15108,6 +15631,7 @@
             if (presetEl) presetEl.value = 'custom';
             syncHeadingFilterFormUi();
             previewHeadingFilterFromForm();
+            syncMapRotationFormUi();
           }
           if (event.target && event.target.id !== 'nativeProfileSetStandard') {
             var stdEl = byId('nativeProfileSetStandard');
@@ -15125,9 +15649,12 @@
       bindAsyncClickIfPresent(byId('nativeProfileSaveBtn'), async function () {
         var payload = nativeProfilePayload();
         var stdEl = byId('nativeProfileSetStandard');
+        // Lokale Prefs sofort sichern (greifen direkt) und das Panel mit EINEM
+        // Klick schliessen. Das eigentliche Speichern laeuft danach im
+        // Hintergrund weiter, ohne das Schliessen zu blockieren.
         saveMapRotationPrefsFromForm();
         saveHeadingFilterPrefsFromForm();
-        await saveNativeProfilePayload(payload);
+        applyMapRotationAutoRuntimeState();
         if (stdEl && stdEl.checked) {
           localStorage.setItem('gpsProfileStandardJson', JSON.stringify(Object.assign({}, payload, {
             mapRotationAuto: byId('nativeProfileMapRotationAuto').checked,
@@ -15137,6 +15664,7 @@
           stdEl.checked = false;
         }
         closeNativeProfileSheet();
+        await saveNativeProfilePayload(payload);
       }, 'Profil speichern fehlgeschlagen:', 'Profil konnte nicht gespeichert werden.');
       bindAsyncClickIfPresent(byId('nativeProfileResetBtn'), async function () {
         var standard = readNativeProfileStandard();
@@ -15500,6 +16028,7 @@
       bindClickIfPresent(panelToggleButton, toggleControlPanel);
       bindClickIfPresent(searchToggleButton, toggleSearchPanel);
       bindAsyncClickIfPresent(locateToggleButton, centerOnCurrentLocation, 'Fehler bei Standortermittlung:', 'Standort konnte nicht ermittelt werden.');
+      bindLocateHardRefreshLongPress(locateToggleButton);
       bindClickIfPresent(mobileAppToggleButton, function () { window.location.href = '/mobile/'; });
       bindClickIfPresent(byId('cacheMapRegionBtn'), function () {
         if (!window.CapacitorMobileBridge || !window.CapacitorMobileBridge.cacheMapRegion) return;
