@@ -29,11 +29,16 @@ public class NativeGpsUploadPlugin extends Plugin {
         double movingSec = call.getDouble("movingSec", 0.5);
         double intervalMin = call.getDouble("intervalMin", 0.0);
         boolean serverUploadEnabled = call.getBoolean("serverUploadEnabled", true);
+        boolean serverLiveHeadingEnabled = call.getBoolean("serverLiveHeadingEnabled", false);
 
         SharedPreferences prefs = getContext().getSharedPreferences(
             NativeGpsUploadService.PREFS_NAME,
             Context.MODE_PRIVATE
         );
+        boolean wasTracking = prefs.getBoolean(NativeGpsUploadService.KEY_TRACKING, false);
+        if (tracking) {
+            serverLiveHeadingEnabled = false;
+        }
         long currentSequenceNumber = prefs.getLong(NativeGpsUploadService.KEY_SEQUENCE, 0L);
         String currentTrackId = prefs.getString(NativeGpsUploadService.KEY_TRACK_ID, "");
         boolean trackChanged = trackId != null && !trackId.trim().isEmpty() && !trackId.equals(currentTrackId);
@@ -64,8 +69,25 @@ public class NativeGpsUploadPlugin extends Plugin {
             .putFloat(NativeGpsUploadService.KEY_CONFIRM_POINTS, call.getDouble("confirmPoints", 3.0).floatValue())
             .putFloat(NativeGpsUploadService.KEY_SPEED_JUMP_KMH, call.getDouble("speedJumpKmh", 8.0).floatValue())
             .putFloat(NativeGpsUploadService.KEY_HEADING_MAP_BEARING_DEADBAND_DEG, call.getDouble("headingMapBearingDeadbandDeg", 6.0).floatValue())
+            .putFloat(NativeGpsUploadService.KEY_DRIVE_ENTER_SPEED_KMH, call.getDouble("driveEnterSpeedKmh", 10.0).floatValue())
+            .putFloat(NativeGpsUploadService.KEY_DRIVE_EXIT_SPEED_KMH, call.getDouble("driveExitSpeedKmh", 6.0).floatValue())
+            .putFloat(NativeGpsUploadService.KEY_DRIVE_CONFIRM_FIXES, call.getDouble("driveConfirmFixes", 3.0).floatValue())
+            .putFloat(NativeGpsUploadService.KEY_DRIVE_EXIT_HOLD_MS, call.getDouble("driveExitHoldMs", 4000.0).floatValue())
+            .putFloat(NativeGpsUploadService.KEY_DRIVE_MIN_MOVE_M, call.getDouble("driveMinMoveM", 1.0).floatValue())
             .putBoolean(NativeGpsUploadService.KEY_SERVER_UPLOAD, serverUploadEnabled)
+            .putBoolean(NativeGpsUploadService.KEY_SERVER_LIVE_HEADING, serverLiveHeadingEnabled)
             .apply();
+        if (wasTracking && !tracking) {
+            Intent flushIntent = new Intent(getContext(), NativeGpsUploadService.class);
+            flushIntent.setAction(NativeGpsUploadService.ACTION_FLUSH_UPLOAD_QUEUE);
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getContext().startForegroundService(flushIntent);
+                } else {
+                    getContext().startService(flushIntent);
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     private void startServiceIfEnabled() {

@@ -410,6 +410,9 @@ function stabilizePositionForStationaryDevice(nextPosition, previousPosition) {
         accuracy: nextPosition.accuracy,
         speed: nextPosition.speed,
         heading: nextPosition.heading,
+        headingSource: nextPosition.headingSource || null,
+        headingMode: nextPosition.headingMode || null,
+        driveModeActive: nextPosition.driveModeActive != null ? nextPosition.driveModeActive === true : null,
         battery: nextPosition.battery,
         timestamp: nextPosition.timestamp,
         receivedAt: nextPosition.receivedAt
@@ -474,6 +477,9 @@ function snapshotLastGoodForDevice(p, deviceKey) {
         accuracy: p.accuracy,
         speed: p.speed,
         heading: p.heading,
+        headingSource: p.headingSource || null,
+        headingMode: p.headingMode || null,
+        driveModeActive: p.driveModeActive != null ? p.driveModeActive === true : null,
         battery: p.battery,
         timestamp: p.timestamp,
         receivedAt: p.receivedAt
@@ -538,6 +544,9 @@ let routePoint = false;
 let segmentId = null;
 let breakBefore = false;
 let mobileLocalTrackingFlag = null;
+let mobileHeadingSource = null;
+let mobileHeadingMode = null;
+let mobileDriveModeActive = null;
 const messageIsRetained = msg.retain === true || msg.retain === "true";
 const topicRoot = topicParts.length ? String(topicParts[0] || "").toLowerCase() : "";
 const payloadSource = String(p.source || "").toLowerCase();
@@ -589,6 +598,9 @@ if (isOwntracks) {
     segmentId = p.segmentId != null ? String(p.segmentId) : null;
     breakBefore = p.breakBefore === true;
     if (p.localTracking !== undefined) mobileLocalTrackingFlag = p.localTracking === true;
+    if (typeof p.headingSource === "string" && p.headingSource.trim()) mobileHeadingSource = p.headingSource.trim();
+    if (typeof p.headingMode === "string" && p.headingMode.trim()) mobileHeadingMode = p.headingMode.trim();
+    if (p.driveModeActive !== undefined) mobileDriveModeActive = p.driveModeActive === true;
 } else {
     const coords = p.coords && typeof p.coords === "object" ? p.coords : null;
     lat = asNumber(p.lat != null ? p.lat : p.latitude);
@@ -643,6 +655,9 @@ const position = {
     accuracy: accuracy !== null && !isNaN(accuracy) ? accuracy : null,
     speed: speed !== null && !isNaN(speed) ? speed : null,
     heading: heading !== null && !isNaN(heading) ? heading : null,
+    headingSource: isMobileApp && mobileHeadingSource ? mobileHeadingSource : null,
+    headingMode: isMobileApp && mobileHeadingMode ? mobileHeadingMode : null,
+    driveModeActive: isMobileApp && mobileDriveModeActive !== null ? mobileDriveModeActive === true : null,
     battery: battery !== null && !isNaN(battery) ? battery : null,
     timestamp: timestamp,
     receivedAt: receivedAt
