@@ -166,6 +166,28 @@
     return /\/sprite(?:@2x)?\.(?:json|png)(?:\?|$)/i.test(String(url || ''));
   }
 
+  function offlineIsMapTilerCriticalRuntimeResourceUrl(url) {
+    return offlineIsStyleUrl(url) || offlineIsTileJsonUrl(url) || offlineIsGlyphUrl(url) || offlineIsSpriteUrl(url);
+  }
+
+  function offlineNativeRuntimeResourceKind(url) {
+    if (offlineIsStyleUrl(url)) return 'Style';
+    if (offlineIsTileJsonUrl(url)) return 'TileJSON';
+    if (offlineIsSpriteUrl(url)) return 'Sprite';
+    if (offlineIsGlyphUrl(url)) return 'Glyph';
+    return 'Resource';
+  }
+
+  function offlineNativeRuntimeMimeType(url, storedMimeType) {
+    const stored = String(storedMimeType || '').trim();
+    if (stored) return stored;
+    const canonical = offlineCanonicalUrl(url);
+    if (/\.png(?:\?|$)/i.test(canonical)) return 'image/png';
+    if (/\.pbf(?:\?|$)/i.test(canonical)) return 'application/x-protobuf';
+    if (/\.json(?:\?|$)/i.test(canonical)) return 'application/json';
+    return 'application/octet-stream';
+  }
+
   function offlineIsUnsupportedGlyphRangeUrl(url) {
     return /\/fonts\/[^/?#]+\/(?:65024-65279|127744-127999)\.pbf(?:\?|$)/i.test(offlineCanonicalUrl(url));
   }
@@ -602,6 +624,51 @@
     return global.btoa(binary);
   }
 
+  function base64ToUint8Array(base64) {
+    const binary = global.atob(String(base64 || ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  async function readNativeOfflineMapResource(url) {
+    const NativeOfflineMapDownload = getNativeOfflineMapDownloadPlugin();
+    if (!NativeOfflineMapDownload || typeof NativeOfflineMapDownload.readCachedResource !== 'function') {
+      return { found: false };
+    }
+    try {
+      const result = await NativeOfflineMapDownload.readCachedResource({ url: url });
+      if (!result || !result.found || !result.base64) return { found: false };
+      return {
+        found: true,
+        mimeType: offlineNativeRuntimeMimeType(url, result.mimeType),
+        bytes: base64ToUint8Array(result.base64)
+      };
+    } catch (error) {
+      return { found: false, error: String(error && error.message || error || '') };
+    }
+  }
+
+  async function offlineNativeRuntimeResponseForUrl(url) {
+    const nativeRead = await readNativeOfflineMapResource(url);
+    if (!nativeRead.found) {
+      offlineResourceLog('OfflineNativeRuntimeMiss', url, 'kind=' + offlineNativeRuntimeResourceKind(url));
+      return null;
+    }
+    offlineLog('OfflineNativeRuntimeHit', 'kind=' + offlineNativeRuntimeResourceKind(url) + ' url=' + offlineUrlForLog(url));
+    offlineLog('OfflineRuntimeServedFromNative', offlineUrlForLog(url));
+    offlineIncrementDebugCounter('cacheHits', 1);
+    if (offlineIsGlyphUrl(url)) offlineIncrementDebugCounter('glyphCacheHits', 1);
+    offlineLogResourceHit(url, offlineCanonicalUrl(url));
+    return new Response(nativeRead.bytes, {
+      status: 200,
+      headers: {
+        'Content-Type': nativeRead.mimeType,
+        'X-Offline-Cache': 'native-runtime'
+      }
+    });
+  }
+
   async function offlineCachedResponseForCanonical(canonical, requestedUrl) {
     try {
       const cachedTile = await idbGet(TILE_STORE, canonical);
@@ -650,7 +717,16 @@
     const targetUrl = offlineTargetUrlForRequest(requestUrl);
     const canonical = offlineCanonicalUrl(targetUrl);
     const cachedResponse = await offlineCachedResponseForUrl(targetUrl);
-    if (cachedResponse) return cachedResponse;
+    if (cachedResponse) {
+      if (offlineIsMapTilerCriticalRuntimeResourceUrl(canonical)) {
+        offlineLog('OfflineRuntimeServedFromIndexedDB', offlineUrlForLog(canonical));
+      }
+      return cachedResponse;
+    }
+    if (offlineIsMapTilerCriticalRuntimeResourceUrl(canonical)) {
+      const nativeResponse = await offlineNativeRuntimeResponseForUrl(targetUrl);
+      if (nativeResponse) return nativeResponse;
+    }
     if (offlineIsTileJsonUrl(canonical) || offlineIsGlyphUrl(canonical) || offlineIsSpriteUrl(canonical)) {
       offlineLogResourceMiss(canonical);
     }
@@ -738,14 +814,24 @@
     if (!cacheOnly) return offlineCachedFetch(url, url, requestInit, offlineMapUpstreamFetch);
     const targetUrl = offlineTargetUrlForRequest(url);
     const canonical = offlineCanonicalUrl(targetUrl);
-    return offlineCachedResponseForUrl(targetUrl).then(function (cachedResponse) {
-      if (cachedResponse) return cachedResponse;
+    return (async function () {
+      const cachedResponse = await offlineCachedResponseForUrl(targetUrl);
+      if (cachedResponse) {
+        if (offlineIsMapTilerCriticalRuntimeResourceUrl(canonical)) {
+          offlineLog('OfflineRuntimeServedFromIndexedDB', offlineUrlForLog(canonical));
+        }
+        return cachedResponse;
+      }
+      if (offlineIsMapTilerCriticalRuntimeResourceUrl(canonical)) {
+        const nativeResponse = await offlineNativeRuntimeResponseForUrl(targetUrl);
+        if (nativeResponse) return nativeResponse;
+      }
       if (offlineIsTileJsonUrl(canonical) || offlineIsGlyphUrl(canonical) || offlineIsSpriteUrl(canonical)) offlineLogResourceMiss(canonical);
       if (isMapTilerUrl(canonical)) return mapTilerCooldownFallbackResponse(canonical);
       if (offlineIsGlyphUrl(canonical)) return offlineRuntimeGlyphFallbackResponse(canonical, offlineKnownRuntimeGlyphMiss(canonical));
       if (offlineIsTileJsonUrl(canonical)) return offlineTileJsonFallbackResponse(targetUrl);
       return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store', 'X-Offline-Cache': 'miss' } });
-    });
+    })();
   }
 
   async function hasNativeOfflineMapResource(url) {

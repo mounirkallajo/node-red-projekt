@@ -391,6 +391,37 @@ public class OfflineMapDownloadPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void readCachedResource(PluginCall call) {
+        String url = call.getString("url", "");
+        JSObject result = new JSObject();
+        result.put("found", false);
+        if (url == null || url.isEmpty()) {
+            call.resolve(result);
+            return;
+        }
+        try {
+            OfflineMapCacheStore store = OfflineMapCacheStore.getInstance(getContext());
+            String lookupUrl = resolveCachedLookupUrl(store, url);
+            if (lookupUrl.isEmpty()) {
+                call.resolve(result);
+                return;
+            }
+            byte[] bytes = store.readBytes(lookupUrl);
+            if (bytes == null || bytes.length == 0) {
+                call.resolve(result);
+                return;
+            }
+            String contentType = store.readContentType(lookupUrl);
+            result.put("found", true);
+            result.put("mimeType", guessCachedResourceMimeType(url, contentType));
+            result.put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP));
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("Cache read failed: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void storeResource(PluginCall call) {
         String url = call.getString("url", "");
         String contentType = call.getString("contentType", "");
@@ -679,6 +710,63 @@ public class OfflineMapDownloadPlugin extends Plugin {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    private static String resolveCachedLookupUrl(OfflineMapCacheStore store, String url) {
+        if (store.hasUrl(url)) return url;
+        String stripped = stripQueryAndFragment(url);
+        if (!stripped.equals(url) && store.hasUrl(stripped)) return stripped;
+        if (isTileJsonUrl(url) || isGlyphUrl(url) || isSpriteUrl(url) || isStyleUrl(url)) {
+            try {
+                String alias = store.findCachedUrlByCanonicalBase(url);
+                if (!alias.isEmpty() && !alias.equals(url) && !alias.equals(stripped) && store.hasUrl(alias)) {
+                    return alias;
+                }
+            } catch (Exception ignored) {}
+        }
+        return "";
+    }
+
+    private static String stripQueryAndFragment(String url) {
+        if (url == null) return "";
+        int end = url.indexOf('#');
+        String out = end >= 0 ? url.substring(0, end) : url;
+        int queryStart = out.indexOf('?');
+        return queryStart >= 0 ? out.substring(0, queryStart) : out;
+    }
+
+    private static boolean isTileJsonUrl(String url) {
+        if (url == null) return false;
+        return url.toLowerCase().matches(".*\\/tiles\\/[^?#]+\\/tiles\\.json(\\?.*)?$");
+    }
+
+    private static boolean isStyleUrl(String url) {
+        if (url == null) return false;
+        return url.toLowerCase().matches(".*\\/maps\\/[^?#]+\\/style\\.json(\\?.*)?$");
+    }
+
+    private static boolean isGlyphUrl(String url) {
+        if (url == null) return false;
+        return url.toLowerCase().matches(".*\\/fonts\\/[^?#]+\\/\\d+-\\d+\\.pbf(\\?.*)?$");
+    }
+
+    private static boolean isSpriteUrl(String url) {
+        if (url == null) return false;
+        return url.toLowerCase().matches(".*\\/sprite(?:@2x)?\\.(?:json|png)(\\?.*)?$");
+    }
+
+    private static String guessCachedResourceMimeType(String url, String storedContentType) {
+        if (storedContentType != null && !storedContentType.trim().isEmpty()) {
+            return storedContentType.trim();
+        }
+        if (url == null) return "application/octet-stream";
+        String lower = url.toLowerCase();
+        int q = lower.indexOf('?');
+        if (q >= 0) lower = lower.substring(0, q);
+        if (lower.endsWith(".pbf")) return "application/x-protobuf";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".json")) return "application/json";
+        return "application/octet-stream";
     }
 
     private static String sanitizeFileName(String value) {
