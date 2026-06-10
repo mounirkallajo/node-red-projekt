@@ -534,22 +534,26 @@ public class OfflineMapWebViewClient extends BridgeWebViewClient {
         return response;
     }
 
-    private CacheHit readCacheHit(OfflineMapCacheStore store, String url) {
-        CacheHit hit = readCacheCandidate(store, url);
-        if (hit != null) return hit;
+    private String resolveWebViewCachedLookupUrl(OfflineMapCacheStore store, String url) {
+        if (url == null || url.isEmpty()) return "";
+        if (store.hasUrl(url)) return url;
         String stripped = stripQueryAndFragment(url);
-        if (!stripped.equals(url)) {
-            hit = readCacheCandidate(store, stripped);
-            if (hit != null) return hit;
+        if (!stripped.equals(url) && store.hasUrl(stripped)) return stripped;
+        try {
+            String alias = store.findCachedUrlByCanonicalBase(url);
+            if (!alias.isEmpty()) return alias;
+        } catch (Exception ignored) {}
+        return "";
+    }
+
+    private CacheHit readCacheHit(OfflineMapCacheStore store, String url) {
+        String lookupUrl = resolveWebViewCachedLookupUrl(store, url);
+        if (lookupUrl.isEmpty()) return null;
+        CacheHit hit = readCacheCandidate(store, lookupUrl);
+        if (hit != null && !lookupUrl.equals(url)) {
+            Log.i(TAG, "OfflineWebViewRuntimeAliasHit url=" + urlForLog(url) + " alias=" + urlForLog(lookupUrl));
         }
-        if (isTileJsonUrl(url) || isGlyphUrl(url) || isSpriteUrl(url) || isStyleUrl(url)) {
-            String alias = "";
-            try { alias = store.findCachedUrlByCanonicalBase(url); } catch (Exception ignored) {}
-            if (!alias.isEmpty() && !alias.equals(url) && !alias.equals(stripped)) {
-                return readCacheCandidate(store, alias);
-            }
-        }
-        return null;
+        return hit;
     }
 
     private CacheHit readCacheCandidate(OfflineMapCacheStore store, String candidate) {
