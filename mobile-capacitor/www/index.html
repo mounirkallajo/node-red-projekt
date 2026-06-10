@@ -3886,12 +3886,39 @@
       return !!(styleConfig && styleConfig.mapId && runtimeMapTilerCooldownActive());
     }
 
+    async function isMapTilerStyleCachedLocally(styleConfig) {
+      try {
+        const styleUrl = resolveBaseMapStyleUrl(styleConfig);
+        if (typeof styleUrl !== 'string') return true;
+        const bridge = window.CapacitorMobileBridge;
+        if (bridge && typeof bridge.hasNativeOfflineMapResource === 'function') {
+          const native = await bridge.hasNativeOfflineMapResource(styleUrl);
+          if (native && native.available) return true;
+        }
+        if (bridge && typeof bridge.fetchOfflineMapResource === 'function') {
+          const response = await bridge.fetchOfflineMapResource(styleUrl, { offlineCacheOnly: true });
+          if (response && response.ok) return true;
+        }
+        return false;
+      } catch (error) {
+        return false;
+      }
+    }
+
     async function preflightMapTilerStyle(styleConfig) {
       if (!styleConfig || !styleConfig.mapId) return resolveBaseMapStyleUrl(styleConfig);
-      if (mapTilerStyleBlockedByCooldown(styleConfig)) {
-        throw new Error('MapTilerCooldown aktiv');
-      }
       const styleUrl = resolveBaseMapStyleUrl(styleConfig);
+      if (mapTilerStyleBlockedByCooldown(styleConfig)) {
+        if (await isMapTilerStyleCachedLocally(styleConfig)) {
+          console.info('MapStylePreflightCooldownBypassLocalCache style=' + styleConfig.id +
+            ' url=' + mapStyleRestoreUrlForLog(typeof styleUrl === 'string' ? styleUrl : ''));
+        } else {
+          console.info('MapStyleCooldownStillBlockedNoLocalCache style=' + styleConfig.id +
+            ' url=' + mapStyleRestoreUrlForLog(typeof styleUrl === 'string' ? styleUrl : '') +
+            ' gate=preflightMapTilerStyle');
+          throw new Error('MapTilerCooldown aktiv');
+        }
+      }
       if (typeof styleUrl !== 'string') return styleUrl;
       const response = await fetch(styleUrl, { cache: 'no-store' });
       if (!response || !response.ok) {
@@ -7279,14 +7306,24 @@
         return;
       }
       if (nextStyleConfig.id !== OSM_FALLBACK_STYLE_ID && mapTilerStyleBlockedByCooldown(nextStyleConfig)) {
-        state.mapTilerFallbackArmed = true;
-        state.failedMapTilerStyleId = nextStyleConfig.id;
-        console.info('MapStyleCycle from=' + fromStyleId + ' to=' + nextStyleConfig.id + ' reason=cooldown-block');
-        console.warn('MapStyleBlockedByCooldown style=' + nextStyleConfig.id);
-        console.info('MapStyleKeepCurrentAfterFailure style=' + nextStyleConfig.id);
-        console.info('MapStyleOSMFallbackArmed failedStyle=' + nextStyleConfig.id);
-        updateMapStyleButtonState();
-        return;
+        const blockedStyleUrl = resolveBaseMapStyleUrl(nextStyleConfig);
+        if (await isMapTilerStyleCachedLocally(nextStyleConfig)) {
+          console.info('MapStyleCooldownBypassLocalCache style=' + nextStyleConfig.id +
+            ' url=' + mapStyleRestoreUrlForLog(typeof blockedStyleUrl === 'string' ? blockedStyleUrl : '') +
+            ' gate=applyBaseMapStyle');
+        } else {
+          console.info('MapStyleCooldownStillBlockedNoLocalCache style=' + nextStyleConfig.id +
+            ' url=' + mapStyleRestoreUrlForLog(typeof blockedStyleUrl === 'string' ? blockedStyleUrl : '') +
+            ' gate=applyBaseMapStyle');
+          state.mapTilerFallbackArmed = true;
+          state.failedMapTilerStyleId = nextStyleConfig.id;
+          console.info('MapStyleCycle from=' + fromStyleId + ' to=' + nextStyleConfig.id + ' reason=cooldown-block');
+          console.warn('MapStyleBlockedByCooldown style=' + nextStyleConfig.id);
+          console.info('MapStyleKeepCurrentAfterFailure style=' + nextStyleConfig.id);
+          console.info('MapStyleOSMFallbackArmed failedStyle=' + nextStyleConfig.id);
+          updateMapStyleButtonState();
+          return;
+        }
       }
       const token = ++state.mapStyleChangeToken;
       state.mapStyleChangeInProgress = true;
