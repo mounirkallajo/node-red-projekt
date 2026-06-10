@@ -381,10 +381,7 @@ public class OfflineMapDownloadPlugin extends Plugin {
     public void hasUrl(PluginCall call) {
         String url = call.getString("url", "");
         OfflineMapCacheStore store = OfflineMapCacheStore.getInstance(getContext());
-        boolean cached = url != null && !url.isEmpty() && store.hasUrl(url);
-        if (!cached && url != null && !url.isEmpty()) {
-            try { cached = !store.findCachedUrlByCanonicalBase(url).isEmpty(); } catch (Exception ignored) {}
-        }
+        boolean cached = !resolveCachedLookupUrl(store, url).isEmpty();
         JSObject result = new JSObject();
         result.put("cached", cached);
         call.resolve(result);
@@ -408,6 +405,7 @@ public class OfflineMapDownloadPlugin extends Plugin {
             }
             byte[] bytes = store.readBytes(lookupUrl);
             if (bytes == null || bytes.length == 0) {
+                result.put("divergence", true);
                 call.resolve(result);
                 return;
             }
@@ -713,46 +711,13 @@ public class OfflineMapDownloadPlugin extends Plugin {
     }
 
     private static String resolveCachedLookupUrl(OfflineMapCacheStore store, String url) {
+        if (url == null || url.isEmpty()) return "";
         if (store.hasUrl(url)) return url;
-        String stripped = stripQueryAndFragment(url);
-        if (!stripped.equals(url) && store.hasUrl(stripped)) return stripped;
-        if (isTileJsonUrl(url) || isGlyphUrl(url) || isSpriteUrl(url) || isStyleUrl(url)) {
-            try {
-                String alias = store.findCachedUrlByCanonicalBase(url);
-                if (!alias.isEmpty() && !alias.equals(url) && !alias.equals(stripped) && store.hasUrl(alias)) {
-                    return alias;
-                }
-            } catch (Exception ignored) {}
-        }
+        try {
+            String alias = store.findCachedUrlByCanonicalBase(url);
+            if (!alias.isEmpty()) return alias;
+        } catch (Exception ignored) {}
         return "";
-    }
-
-    private static String stripQueryAndFragment(String url) {
-        if (url == null) return "";
-        int end = url.indexOf('#');
-        String out = end >= 0 ? url.substring(0, end) : url;
-        int queryStart = out.indexOf('?');
-        return queryStart >= 0 ? out.substring(0, queryStart) : out;
-    }
-
-    private static boolean isTileJsonUrl(String url) {
-        if (url == null) return false;
-        return url.toLowerCase().matches(".*\\/tiles\\/[^?#]+\\/tiles\\.json(\\?.*)?$");
-    }
-
-    private static boolean isStyleUrl(String url) {
-        if (url == null) return false;
-        return url.toLowerCase().matches(".*\\/maps\\/[^?#]+\\/style\\.json(\\?.*)?$");
-    }
-
-    private static boolean isGlyphUrl(String url) {
-        if (url == null) return false;
-        return url.toLowerCase().matches(".*\\/fonts\\/[^?#]+\\/\\d+-\\d+\\.pbf(\\?.*)?$");
-    }
-
-    private static boolean isSpriteUrl(String url) {
-        if (url == null) return false;
-        return url.toLowerCase().matches(".*\\/sprite(?:@2x)?\\.(?:json|png)(\\?.*)?$");
     }
 
     private static String guessCachedResourceMimeType(String url, String storedContentType) {
