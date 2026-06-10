@@ -1,0 +1,313 @@
+CODE REVIEW & SELF-TEST PLAN
+Branch: cursor/native-runtime-cache-read-bc3a
+Commit: 30d70d5
+Datum: 2026-06-09
+
+================================================================================
+1. ALLE DREI DATEIEN AUF DEM BRANCH COMMITTED?
+================================================================================
+
+JA.
+
+Branch cursor/native-runtime-cache-read-bc3a hat einen Commit (30d70d5) mit genau
+diesen drei Dateien:
+
+  - mobile/capacitor-bridge.js
+  - mobile-capacitor/www/mobile/capacitor-bridge.js
+  - mobile-capacitor/android/app/src/main/java/de/tracking/mobile/offlinemap/OfflineMapDownloadPlugin.java
+
+Working tree clean. Branch ist auf origin gepusht.
+
+
+================================================================================
+2. WAS "[BLOCKED]" BEDEUTETE
+================================================================================
+
+NUR die PR-Erstellung war blockiert (GitHub-Berechtigung: "must be a collaborator").
+
+Datei-Edits, Commit und git push -u origin cursor/native-runtime-cache-read-bc3a
+waren erfolgreich. Keine Blockade bei Änderungen, Commit oder Push.
+
+
+================================================================================
+3. EXAKTE FETCH-REIHENFOLGE IN offlineCachedFetch()
+================================================================================
+
+Für MapTiler-kritische Runtime-Ressourcen (Style, tiles.json, Sprite, Glyph):
+
+  Schritt 1: offlineCachedResponseForUrl()  → IndexedDB
+  Schritt 2: offlineNativeRuntimeResponseForUrl() → native readCachedResource
+  Schritt 3: mapTilerCooldownBeforeRequest()
+  Schritt 4a: Wenn cooldown blocked → mapTilerCooldownFallbackResponse() (503)
+  Schritt 4b: Wenn nicht blocked → Netzwerk via mapTilerFetchWithTimeout / upstreamFetch
+  Schritt 5: Bei Netzwerkfehler oder 401/403/429 → cooldown start → 503
+
+Für nicht-kritische URLs (z.B. Tiles): Schritt 2 wird übersprungen.
+Reihenfolge: IndexedDB → Cooldown-Check → Netzwerk → 503.
+
+
+================================================================================
+4. KANN "MapTilerCooldown block" VOR native readCachedResource PASSIEREN?
+================================================================================
+
+NEIN — nicht für die gelisteten kritischen Ressourcen.
+
+mapTilerCooldownBeforeRequest() wird erst NACH IndexedDB- und Native-Versuch
+aufgerufen (Zeilen 726–733 in capacitor-bridge.js).
+
+Abdeckung:
+
+  Ressource              | Erkannt durch
+  -----------------------|--------------------------------------------------
+  style JSON             | offlineIsStyleUrl
+  tiles.json             | offlineIsTileJsonUrl
+  sprite.json / .png     | offlineIsSpriteUrl (sprite(?:@2x)?\.(?:json|png))
+  sprite@2x.json / .png  | gleiche Regex
+  font/glyph .pbf        | offlineIsGlyphUrl
+
+Alle sind in offlineIsMapTilerCriticalRuntimeResourceUrl() enthalten.
+
+
+================================================================================
+5. STYLE-FILE-LADEN UND HTTP 503 VOR NATIVE/NETZWERK?
+================================================================================
+
+GRÖSSTENTEILS JA — mit einer Präzisierung:
+
+  - Runtime MapLibre Style-Fetch: patched global.fetch → offlineCachedFetch
+    → gleiche Reihenfolge. Native wird vor Cooldown/503 versucht.
+
+  - Offline-Region-Download (cacheMapRegion, buildOfflineRegionDownloadPlan):
+    lädt Style via global.fetch(styleUrl), NICHT fetchOfflineMapResource.
+    Geht aber trotzdem durch offlineCachedFetch (Fetch-Patch) → Fix greift.
+
+  - fetchOfflineMapResource(url) ohne offlineCacheOnly:
+    delegiert an offlineCachedFetch → gleiche Reihenfolge, Netzwerk erlaubt.
+
+  - fetchOfflineMapResource(url, { offlineCacheOnly: true }):
+    IndexedDB → native → cooldown/503, KEIN Netzwerk (by design für cache-only).
+
+Style-Download mit verfügbarem Netzwerk bekommt kein 503 von Cooldown, solange
+Native-Cache den Style hat. Wenn beide Caches fehlen und Cooldown aktiv ist,
+ist 503 vor Netzwerk weiterhin möglich — beabsichtigtes Cooldown-Verhalten.
+
+
+================================================================================
+6. readCachedResource() — GLEICHE URL-AUFLÖSUNG WIE hasUrl()?
+================================================================================
+
+GRÖSSTENTEILS JA — nicht byte-identisch.
+
+Beide nutzen OfflineMapCacheStore und findCachedUrlByCanonicalBase() für
+Alias-Lookup. Storage-Keys über canonicalKey() (entfernt key/apikey/access_token,
+sortiert verbleibende Query-Params, normalisiert Glyph-Font-Stacks).
+
+readCachedResource Auflösung (resolveCachedLookupUrl):
+
+  1. store.hasUrl(url) — nutzt canonicalKey(url) für Bin-Pfad
+  2. store.hasUrl(stripQueryAndFragment(url)) — Extra-Schritt, den hasUrl() nicht
+     explizit macht
+  3. findCachedUrlByCanonicalBase(url) → Alias, mit store.hasUrl(alias) und
+     alias ≠ url und alias ≠ stripped
+
+  Fall                    | Erwartetes Verhalten
+  ------------------------|--------------------------------------------------
+  ?key=...                | via canonicalKey / stripped lookup
+  %20 in Pfaden           | JS offlineNormalizeGlyphUrl; Java normalizeGlyphCanonicalBase
+  Glyph-Komma-Fontstacks  | gleiche Store-Normalisierung
+  sprite@2x               | Regex sprite(?:@2x)?\.(json|png)
+  tiles.json              | Regex + findCachedUrlByCanonicalBase
+
+REVIEW-HINWEIS (kein bestätigter Bug):
+hasUrl() kann true sein, wenn findCachedUrlByCanonicalBase nicht-leer ist, auch
+wenn store.hasUrl(url) false ist. readCachedResource kann trotzdem found:false
+liefern, wenn alias gleich stripped ist und store.hasUrl(stripped) false ist.
+Bei normalen gesunden Cache-Einträgen sollte das nicht vorkommen. Symptom wäre:
+MapStyleRestoreDependencyHit source=native bei Preflight, aber
+OfflineNativeRuntimeMiss zur Laufzeit.
+
+
+================================================================================
+7. NATIVE METHODE LIEFERT ECHTE BYTES?
+================================================================================
+
+JA.
+
+Bei Treffer liefert readCachedResource:
+
+  - found: true
+  - mimeType (aus Sidecar oder guessCachedResourceMimeType)
+  - base64 (vollständige Datei via Base64.encodeToString(bytes, Base64.NO_WRAP))
+
+Bei Miss: nur found: false (kein base64). Leere/null Bytes → found: false.
+
+Read-only: nutzt readBytes/readContentType; keine Writes, Queue oder Migration.
+
+
+================================================================================
+8. JS DEKODIERT UND LIEFERT ECHTE Response?
+================================================================================
+
+JA.
+
+  - base64ToUint8Array() via atob → Uint8Array
+  - new Response(nativeRead.bytes, { status: 200, headers: { Content-Type: ... } })
+  - Leeres/fehlendes base64 abgelehnt:
+    if (!result || !result.found || !result.base64) return { found: false }
+  - Ungültiges base64: atob wirft → catch → { found: false }
+
+
+================================================================================
+9. PREFLIGHT MapStyleRestoreDependencyHit source=native → RUNTIME-LOGS?
+================================================================================
+
+JA — wenn Runtime durch offlineCachedFetch geht und IndexedDB fehlt.
+
+Erwartete Sequenz für dieselbe URL:
+
+  [offline-map] OfflineNativeRuntimeHit: kind=... url=...
+  [offline-map] OfflineRuntimeServedFromNative: ...
+
+Plus bestehende Hit-Logs (OfflineTileJsonHit, OfflineSpriteHit, etc.).
+
+EINSCHRÄNKUNG: Preflight nutzt hasUrl() (Existenz). Runtime nutzt
+readCachedResource() (Bytes). Sollten für gesunde Einträge übereinstimmen;
+Divergenz nur im Q6-Edge-Case möglich.
+
+
+================================================================================
+10. REQUEST-STORM-RISIKO
+================================================================================
+
+Mechanismus                    | Native-Miss gecacht? | Anmerkung
+-------------------------------|----------------------|----------------------------------
+offlineResourceLog /           | Nur Logs, 10s        | Reduziert Log-Spam, nicht
+OfflineNativeRuntimeMiss       | Throttle pro URL     | Bridge-Calls
+mapTilerCooldownBlock          | Nur Logs, 5s/URL     | Gleich
+offlineKnownRuntimeGlyphMiss   | In-Memory pro        | Überspringt NETZWERK, nicht
+                               | kanonischer Glyph-URL| native readCachedResource
+Native Negative Cache          | NEIN                 | Jeder Request: IDB miss →
+                               |                      | Native-Bridge-Call
+
+RISIKO: MapLibre kann wiederholt dieselbe fehlende Glyph-Range anfragen. Jeder
+Request ruft trotzdem native readCachedResource auf. Logs gedrosselt; Bridge-Calls
+nicht.
+
+MITIGATION HEUTE: Glyph-Fallback + offlineKnownRuntimeGlyphMiss verhindern
+Netzwerk-Stürme; Cooldown begrenzt MapTiler-Netzwerk. KEINE Mitigation für
+wiederholte Native-Reads bei persistenten Misses.
+
+Kein funktionaler Bug für das gemeldete 503-Problem; residuelles Performance-
+Risiko bei vielen fehlenden Glyphs.
+
+
+================================================================================
+11. "UNEXPECTED END OF INPUT"-RISIKO
+================================================================================
+
+Risiko              | Bewertung
+--------------------|----------------------------------------------------------
+Truncated JSON      | Niedrig — Native liest vollständige .bin-Datei
+Leeres JSON-Payload | Blockiert — Java lehnt bytes.length==0 ab; JS lehnt
+                    | leeres base64 ab
+Korruptes base64    | atob wirft → Miss, kein partielles Response
+Falsches MIME       | Unwahrscheinlich Parse-Truncation; MapLibre parst Bytes
+
+Kein bestätigter Truncation-Pfad in dieser Änderung.
+
+
+================================================================================
+12. STATIC / BUILD CHECKS
+================================================================================
+
+Check                                              | Ergebnis
+---------------------------------------------------|--------------------------
+JS-Syntax mobile/capacitor-bridge.js               | OK
+JS-Syntax mobile-capacitor/www/.../capacitor-bridge.js | OK
+Diff Source vs www                                 | Identisch
+Java-Imports im Plugin                             | Base64 vorhanden; keine neuen Imports nötig
+Capacitor-Registrierung                            | @PluginMethod auf readCachedResource;
+                                                   | MainActivity.registerPlugin(OfflineMapDownloadPlugin.class)
+Gradle-Compile                                     | FEHLGESCHLAGEN — fehlende Datei:
+                                                   | capacitor-cordova-android-plugins/cordova.variables.gradle
+                                                   | (Umgebungs-/Setup-Problem, nicht durch diesen Diff)
+
+Kein Missing-Import- oder Registrierungsproblem im Diff selbst.
+
+
+================================================================================
+13. ERWARTETE LOG-SEQUENZEN (SELF-TEST PLAN)
+================================================================================
+
+A) COLD START OFFLINE (Flugmodus, gecachtes Standard)
+
+  1. MapStyleRestoreDependencyHit kind=TileJSON source=native ...
+  2. MapStyleRestoreDependencyHit kind=Sprite JSON source=native ... (etc.)
+  3. Bei MapLibre-Fetch:
+     - [offline-map] OfflineNativeRuntimeHit: kind=Style url=...
+     - [offline-map] OfflineRuntimeServedFromNative: ...
+     - Gleiches Muster für TileJSON, Sprite, Glyph
+  4. MapTilerCooldown block darf NICHT vor Native-Hit-Logs für diese URLs kommen
+  5. Karte mit Labels/Sprites; kein beiges Fallback
+
+B) STANDARD → OSM → STANDARD
+
+  1. Preflight: MapStyleRestoreDependencyHit ... source=native
+  2. Runtime-Restore: OfflineNativeRuntimeHit + OfflineRuntimeServedFromNative
+     pro Dependency
+  3. Kein OfflineTileJsonMiss/OfflineSpriteMiss direkt gefolgt von
+     MapTilerCooldown block für gecachte URLs
+  4. Standard-Style stellt lokal wieder her
+
+C) NEUE OFFLINE-REGION (Netzwerk verfügbar)
+
+  1. Offline-Karte: Stil wird geladen…
+  2. Style-Fetch: OfflineRuntimeServedFromIndexedDB oder OfflineRuntimeServedFromNative,
+     oder erfolgreiches Netzwerk (200)
+  3. Darf NICHT werfen: Stil-Datei konnte nicht geladen werden (HTTP 503), wenn
+     Style im Cache ist oder Netzwerk erreichbar und Cooldown inaktiv
+  4. Cooldown aktiv aber Native hat Style: Native-Hit-Logs, Download läuft weiter
+
+D) NEGATIV-KONTROLLE (echter Miss, Cooldown aktiv)
+
+  1. OfflineNativeRuntimeMiss kind=... url=... (max. 1x/10s pro URL in Logs)
+  2. Dann MapTilerCooldown block url=...
+  3. Dann 503/AJAXError — erst nach beiden Cache-Misses
+
+
+================================================================================
+BESTÄTIGTE BUGS
+================================================================================
+
+KEINE bestätigt, die den intendierten Fix blockieren würden.
+Der Branch implementiert die geforderte Reihenfolge korrekt.
+
+RESIDUELLE RISIKEN (nur dokumentiert):
+
+  1. Kein Native-Negative-Cache → wiederholte Bridge-Calls bei persistenten
+     Glyph-Misses (Q10).
+  2. Theoretischer hasUrl-true / readCachedResource-false Edge-Case (Q6) —
+     unwahrscheinlich bei gesunden Cache-Einträgen.
+
+
+================================================================================
+GEÄNDERTE FUNKTIONEN (KURZREFERENZ)
+================================================================================
+
+Java (OfflineMapDownloadPlugin.java):
+  - readCachedResource (neu)
+  - resolveCachedLookupUrl, guessCachedResourceMimeType (neu, privat)
+  - isTileJsonUrl, isStyleUrl, isGlyphUrl, isSpriteUrl, stripQueryAndFragment (neu, privat)
+
+JS (capacitor-bridge.js + www-Kopie):
+  - offlineIsMapTilerCriticalRuntimeResourceUrl (neu)
+  - offlineNativeRuntimeResourceKind (neu)
+  - offlineNativeRuntimeMimeType (neu)
+  - base64ToUint8Array (neu)
+  - readNativeOfflineMapResource (neu)
+  - offlineNativeRuntimeResponseForUrl (neu)
+  - offlineCachedFetch (geändert)
+  - fetchOfflineMapResource cacheOnly-Pfad (geändert)
+
+Nicht geändert: style-cycle, OSM-Fallback, Tracking, GPS, MQTT, Routes,
+Overlays, Queue-Logik, Storage-Schema, Cooldown-Dauer, UI.
