@@ -624,6 +624,35 @@
     return global.btoa(binary);
   }
 
+  const OFFLINE_NATIVE_RUNTIME_NEGATIVE_CACHE_TTL_MS = 30000;
+
+  function offlineNativeRuntimeNegativeCacheState() {
+    return global.__offlineNativeRuntimeNegativeCache || (global.__offlineNativeRuntimeNegativeCache = {});
+  }
+
+  function offlineNativeRuntimeNegativeCacheKey(url) {
+    return offlineCanonicalUrl(url);
+  }
+
+  function offlineNativeRuntimeNegativeCacheGet(url) {
+    const key = offlineNativeRuntimeNegativeCacheKey(url);
+    const entry = offlineNativeRuntimeNegativeCacheState()[key];
+    if (!entry) return false;
+    if (Date.now() - entry.at > OFFLINE_NATIVE_RUNTIME_NEGATIVE_CACHE_TTL_MS) {
+      delete offlineNativeRuntimeNegativeCacheState()[key];
+      return false;
+    }
+    return true;
+  }
+
+  function offlineNativeRuntimeNegativeCacheSet(url) {
+    offlineNativeRuntimeNegativeCacheState()[offlineNativeRuntimeNegativeCacheKey(url)] = { at: Date.now() };
+  }
+
+  function offlineNativeRuntimeNegativeCacheClear(url) {
+    delete offlineNativeRuntimeNegativeCacheState()[offlineNativeRuntimeNegativeCacheKey(url)];
+  }
+
   function base64ToUint8Array(base64) {
     const binary = global.atob(String(base64 || ''));
     const bytes = new Uint8Array(binary.length);
@@ -636,9 +665,20 @@
     if (!NativeOfflineMapDownload || typeof NativeOfflineMapDownload.readCachedResource !== 'function') {
       return { found: false };
     }
+    if (offlineNativeRuntimeNegativeCacheGet(url)) {
+      offlineResourceLog('OfflineNativeRuntimeNegativeCacheHit', url, 'kind=' + offlineNativeRuntimeResourceKind(url));
+      return { found: false, negativeCache: true };
+    }
     try {
       const result = await NativeOfflineMapDownload.readCachedResource({ url: url });
-      if (!result || !result.found || !result.base64) return { found: false };
+      if (!result || !result.found || !result.base64) {
+        if (result && result.divergence) {
+          offlineResourceLog('OfflineNativeRuntimeDivergence', url, 'hasUrl=true readCachedResource=false');
+        }
+        offlineNativeRuntimeNegativeCacheSet(url);
+        return { found: false };
+      }
+      offlineNativeRuntimeNegativeCacheClear(url);
       return {
         found: true,
         mimeType: offlineNativeRuntimeMimeType(url, result.mimeType),
@@ -652,7 +692,9 @@
   async function offlineNativeRuntimeResponseForUrl(url) {
     const nativeRead = await readNativeOfflineMapResource(url);
     if (!nativeRead.found) {
-      offlineResourceLog('OfflineNativeRuntimeMiss', url, 'kind=' + offlineNativeRuntimeResourceKind(url));
+      if (!nativeRead.negativeCache) {
+        offlineResourceLog('OfflineNativeRuntimeMiss', url, 'kind=' + offlineNativeRuntimeResourceKind(url));
+      }
       return null;
     }
     offlineLog('OfflineNativeRuntimeHit', 'kind=' + offlineNativeRuntimeResourceKind(url) + ' url=' + offlineUrlForLog(url));
