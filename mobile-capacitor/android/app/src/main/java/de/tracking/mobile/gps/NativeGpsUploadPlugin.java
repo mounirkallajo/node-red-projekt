@@ -4,12 +4,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.util.Log;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import org.json.JSONObject;
 
 @CapacitorPlugin(name = "NativeGpsUpload")
 public class NativeGpsUploadPlugin extends Plugin {
@@ -207,16 +210,25 @@ public class NativeGpsUploadPlugin extends Plugin {
 
     @PluginMethod
     public void setCompassHeading(PluginCall call) {
-        Double headingDeg = call.getDouble("headingDeg");
-        if (headingDeg == null || Double.isNaN(headingDeg) || Double.isInfinite(headingDeg)) {
+        Object headingRaw = call.getData().opt("headingDeg");
+        Object timestampRaw = call.getData().opt("timestampMs");
+        Double heading = extractDouble(headingRaw);
+        Long timestamp = extractLong(timestampRaw);
+        if (heading == null || Double.isNaN(heading) || Double.isInfinite(heading)) {
+            Log.w("NativeGpsUpload",
+                "compassHeading rejected source=method reason=heading" +
+                " headingRaw=" + headingRaw + " timestampRaw=" + timestampRaw);
             call.resolve();
             return;
         }
-        double normalized = ((headingDeg % 360.0) + 360.0) % 360.0;
-        Double timestampMs = call.getDouble("timestampMs");
-        long timestamp = (timestampMs != null && !Double.isNaN(timestampMs) && timestampMs > 0)
-            ? timestampMs.longValue()
-            : System.currentTimeMillis();
+        if (timestamp == null || timestamp <= 0) {
+            Log.w("NativeGpsUpload",
+                "compassHeading rejected source=method reason=timestamp" +
+                " headingRaw=" + headingRaw + " timestampRaw=" + timestampRaw);
+            call.resolve();
+            return;
+        }
+        double normalized = ((heading % 360.0) + 360.0) % 360.0;
         SharedPreferences prefs = getContext().getSharedPreferences(
             NativeGpsUploadService.PREFS_NAME,
             Context.MODE_PRIVATE
@@ -225,6 +237,34 @@ public class NativeGpsUploadPlugin extends Plugin {
             .putLong(NativeGpsUploadService.KEY_COMPASS_HEADING, Double.doubleToLongBits(normalized))
             .putLong(NativeGpsUploadService.KEY_COMPASS_HEADING_AT_MS, timestamp)
             .apply();
+        Log.i("NativeGpsUpload",
+            "compassHeading saved source=method heading=" + normalized +
+            " timestampMs=" + timestamp);
         call.resolve();
+    }
+
+    private static Double extractDouble(Object value) {
+        if (value == null || value == JSONObject.NULL) return null;
+        if (value instanceof Number) return ((Number) value).doubleValue();
+        if (value instanceof String) {
+            try { return Double.parseDouble((String) value); }
+            catch (NumberFormatException ignored) { return null; }
+        }
+        return null;
+    }
+
+    private static Long extractLong(Object value) {
+        if (value == null || value == JSONObject.NULL) return null;
+        if (value instanceof Long) return (Long) value;
+        if (value instanceof Number) {
+            double d = ((Number) value).doubleValue();
+            if (Double.isNaN(d) || Double.isInfinite(d)) return null;
+            return (long) d;
+        }
+        if (value instanceof String) {
+            try { return Long.parseLong((String) value); }
+            catch (NumberFormatException ignored) { return null; }
+        }
+        return null;
     }
 }
