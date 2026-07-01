@@ -80,6 +80,9 @@ public class NativeGpsUploadService extends Service {
     public static final String KEY_SERVER_LIVE_HEADING = "serverLiveHeadingEnabled";
     public static final String KEY_LAST_ROUTE_SEND_MS = "lastRouteSendMs";
     public static final String KEY_LAST_KEEPALIVE_SEND_MS = "lastKeepaliveSendMs";
+    public static final String KEY_COMPASS_HEADING = "compassHeading";
+    public static final String KEY_COMPASS_HEADING_AT_MS = "compassHeadingAtMs";
+    public static final long COMPASS_MAX_AGE_MS = 8000L;
 
     private static final int NOTIFICATION_ID = 28352;
     private static final int LIVE_NOTIFICATION_ID = 28353;
@@ -615,10 +618,24 @@ public class NativeGpsUploadService extends Service {
         return "stationary";
     }
 
+    private Double readFreshCompassHeading(SharedPreferences prefs) {
+        long timestamp = prefs.getLong(KEY_COMPASS_HEADING_AT_MS, 0L);
+        if (timestamp <= 0) return null;
+        if (System.currentTimeMillis() - timestamp > COMPASS_MAX_AGE_MS) return null;
+        long bits = prefs.getLong(KEY_COMPASS_HEADING, Double.doubleToLongBits(Double.NaN));
+        double heading = Double.longBitsToDouble(bits);
+        if (Double.isNaN(heading)) return null;
+        return heading;
+    }
+
     private EffectiveHeading resolveEffectiveHeading(Location location, SharedPreferences prefs) {
+        Double compassHeading = readFreshCompassHeading(prefs);
         if (location == null || stableLat == null || stableLon == null) {
             if (location != null && location.hasBearing()) {
                 return new EffectiveHeading((double) location.getBearing(), "gps", "walk");
+            }
+            if (compassHeading != null) {
+                return new EffectiveHeading(compassHeading, "compass", "stationary");
             }
             return new EffectiveHeading(lastMovementHoldHeading, "hold", "stationary");
         }
@@ -665,10 +682,16 @@ public class NativeGpsUploadService extends Service {
             } else if (gpsBearing != null) {
                 value = gpsBearing;
                 source = "gps";
+            } else if (compassHeading != null) {
+                value = compassHeading;
+                source = "compass";
             } else if (lastMovementHoldHeading != null) {
                 value = lastMovementHoldHeading;
                 source = "hold";
             }
+        } else if (compassHeading != null) {
+            value = compassHeading;
+            source = "compass";
         } else if (lastMovementHoldHeading != null) {
             value = lastMovementHoldHeading;
             source = "hold";

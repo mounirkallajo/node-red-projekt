@@ -204,4 +204,27 @@ public class NativeGpsUploadPlugin extends Plugin {
         result.put("tracking", prefs.getBoolean(NativeGpsUploadService.KEY_TRACKING, false));
         call.resolve(result);
     }
+
+    @PluginMethod
+    public void setCompassHeading(PluginCall call) {
+        Double headingDeg = call.getDouble("headingDeg");
+        if (headingDeg == null || Double.isNaN(headingDeg) || Double.isInfinite(headingDeg)) {
+            call.resolve();
+            return;
+        }
+        double normalized = ((headingDeg % 360.0) + 360.0) % 360.0;
+        Double timestampMs = call.getDouble("timestampMs");
+        long timestamp = (timestampMs != null && !Double.isNaN(timestampMs) && timestampMs > 0)
+            ? timestampMs.longValue()
+            : System.currentTimeMillis();
+        SharedPreferences prefs = getContext().getSharedPreferences(
+            NativeGpsUploadService.PREFS_NAME,
+            Context.MODE_PRIVATE
+        );
+        prefs.edit()
+            .putLong(NativeGpsUploadService.KEY_COMPASS_HEADING, Double.doubleToLongBits(normalized))
+            .putLong(NativeGpsUploadService.KEY_COMPASS_HEADING_AT_MS, timestamp)
+            .apply();
+        call.resolve();
+    }
 }

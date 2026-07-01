@@ -1018,6 +1018,9 @@
   let lastHeadingBurstMs = 0;
   let lastHeadingBurstHeading = null;
   let headingBurstInFlight = false;
+  let lastNativeCompassSyncHeading = null;
+  let lastNativeCompassSyncMs = 0;
+  const NATIVE_COMPASS_KEEPALIVE_MS = 4000;
   let offlineModeActive = false;
   let syncInFlight = false;
   let bridgeReady = false;
@@ -1561,6 +1564,27 @@
     });
     publishHeadingFilterDebugEvent();
     publishHeadingBurstIfNeeded();
+    syncLatestCompassHeadingToNative();
+  }
+
+  function syncLatestCompassHeadingToNative() {
+    if (latestCompassHeading == null) return;
+    const nativeUpload = nativeUploadPlugin();
+    if (!nativeUpload || typeof nativeUpload.setCompassHeading !== 'function') return;
+    const now = Date.now();
+    const deadbandDeg = uploadSettings.headingBurstDeg;
+    const changedEnough = lastNativeCompassSyncHeading == null ||
+      headingDelta(latestCompassHeading, lastNativeCompassSyncHeading) >= deadbandDeg;
+    const keepaliveDue = (now - lastNativeCompassSyncMs) >= NATIVE_COMPASS_KEEPALIVE_MS;
+    if (!changedEnough && !keepaliveDue) return;
+    lastNativeCompassSyncHeading = latestCompassHeading;
+    lastNativeCompassSyncMs = now;
+    try {
+      Promise.resolve(nativeUpload.setCompassHeading({
+        headingDeg: latestCompassHeading,
+        timestampMs: now
+      })).catch(function () {});
+    } catch (error) {}
   }
 
   function normalizeHeadingValue(heading) {
