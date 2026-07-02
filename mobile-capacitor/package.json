@@ -2,7 +2,7 @@
   "name": "tracking-mobile-capacitor",
   "private": true,
   "version": "0.1.0",
-  "description": "Native Capacitor-App: lädt die Web-Karte (/map) 1:1 vom Server.",
+  "description": "Native Capacitor app: starts Maplogik locally from APK assets; server features connect optionally in the background.",
   "scripts": {
     "prepare:www": "node scripts/prepare-www.js",
     "sync": "npm run prepare:www && npx cap sync",
@@ -13,6 +13,7 @@
     "apk:copy": "node ../scripts/copy-android-apk.js"
   },
   "dependencies": {
+    "@capacitor-community/background-geolocation": "^1.2.22",
     "@capacitor/android": "^7.0.0",
     "@capacitor/cli": "^7.0.0",
     "@capacitor/core": "^7.0.0",
@@ -21,7 +22,8 @@
     "@capacitor/network": "^7.0.0",
     "@capacitor/preferences": "^7.0.0",
     "@capacitor/status-bar": "^7.0.0",
-    "@capacitor-community/background-geolocation": "^1.2.22"
+    "@mapbox/mapbox-gl-rtl-text": "^0.3.0",
+    "maplibre-gl": "^5.14.0"
   },
   "devDependencies": {}
 }

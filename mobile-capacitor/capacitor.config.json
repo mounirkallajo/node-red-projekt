@@ -3,8 +3,8 @@
   "appName": "GPS Tracking",
   "webDir": "www",
   "server": {
-    "url": "https://raspberrypi.tail47e91f.ts.net/map",
     "androidScheme": "https",
+    "cleartext": true,
     "allowNavigation": [
       "raspberrypi.tail47e91f.ts.net",
       "*.tailscale.net",

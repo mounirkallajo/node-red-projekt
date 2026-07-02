@@ -1,20 +1,18 @@
 # GPS Tracking Capacitor App
 
-Die App ist ein **nativer WebView-Wrapper** um die bestehende Web-Karte. Beim Start lädt sie direkt (ohne Browser-Umweg):
+Die App startet lokal aus den APK-Assets. `Maplogik` bleibt die eine UI-Quelle:
 
 ```text
-https://raspberrypi.tail47e91f.ts.net/map
+../Maplogik -> scripts/prepare-www.js -> www/index.html -> Android assets
 ```
 
-Die Oberfläche ist **1:1 identisch** mit `/map` im Browser — sie läuft aber **innerhalb der App** (eigenes Icon, kein Chrome-Tab).
-
-Server-URL steht in `capacitor.config.json` unter `server.url`. Nach Änderung: `npm run sync`, neu bauen, APK kopieren.
+Der Server ist nach dem Start optional. Wenn er erreichbar ist, werden MQTT, HTTP-Sync, Live-Status und Uploads ueber die zentrale Server-Basis-URL aktiviert. Wenn er nicht erreichbar ist, bleibt die lokale Karte/GPS/Offline-Cache-Nutzung aktiv.
 
 Die Node-RED-Seite `/mobile/` dient nur zum APK-Download.
 
 ## Android per Browser installieren
 
-1. APK in Android Studio bauen: **Build → Build APK(s)**
+1. APK in Android Studio bauen: **Build -> Build APK(s)**
 2. Am PC:
 
 ```powershell
@@ -33,7 +31,7 @@ npm run sync
 npm run open:android
 ```
 
-Nach Änderungen an `www/` oder `capacitor.config.json`:
+Nach Aenderungen an `../Maplogik`, `../mobile/capacitor-bridge.js`, `www/`-Assets oder `capacitor.config.json`:
 
 ```powershell
 npm run sync
@@ -45,12 +43,16 @@ APK kopieren:
 npm run apk:copy
 ```
 
-## Server-URL
+## Server-Basis-URL
 
-Standard: `https://raspberrypi.tail47e91f.ts.net` (in `www/bootstrap.js`).
+Der lokale APK-Build setzt `window.MOBILE_DEFAULT_SERVER_BASE_URL` auf:
 
-Andere URL: in `capacitor.config.json` / `bootstrap.js` anpassen, neu bauen, oder später per Capacitor Preferences (`gpsTrackingServerBase`).
+```text
+https://raspberrypi.tail47e91f.ts.net
+```
+
+Diese URL wird nur fuer optionale Serverfunktionen verwendet. Sie ist keine Start-URL mehr. In der App kann sie weiterhin ueber das Profil/Server-Feld gespeichert werden.
 
 ## Hinweis
 
-Tailscale muss auf dem Handy aktiv sein, sonst erreicht die App den Pi nicht. Updates an der Karte wirken sofort in Browser **und** App — es gibt keine separate App-Oberfläche mehr.
+Tailscale muss nur fuer Serverfunktionen aktiv sein. Offline-Start, lokale GPS-Anzeige und heruntergeladene Kartenbereiche funktionieren ohne Pi/Node-RED/Tailscale.

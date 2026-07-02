@@ -10,9 +10,11 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.location.Location;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
@@ -38,6 +40,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class NativeGpsUploadService extends Service {
+    private static final String TAG = "NativeGpsUploadService";
+    public static final String ACTION_FLUSH_UPLOAD_QUEUE = "de.tracking.mobile.gps.FLUSH_UPLOAD_QUEUE";
     public static final String PREFS_NAME = "native_gps_upload";
     public static final String KEY_ENABLED = "enabled";
     public static final String KEY_SERVER_URL = "serverUrl";
@@ -69,19 +73,40 @@ public class NativeGpsUploadService extends Service {
     public static final String KEY_STATIONARY_MAX_RADIUS_M = "stationaryMaxRadiusM";
     public static final String KEY_CONFIRM_POINTS = "confirmPoints";
     public static final String KEY_SPEED_JUMP_KMH = "speedJumpKmh";
+    public static final String KEY_DRIVE_ENTER_SPEED_KMH = "driveEnterSpeedKmh";
+    public static final String KEY_DRIVE_EXIT_SPEED_KMH = "driveExitSpeedKmh";
+    public static final String KEY_DRIVE_CONFIRM_FIXES = "driveConfirmFixes";
+    public static final String KEY_DRIVE_EXIT_HOLD_MS = "driveExitHoldMs";
+    public static final String KEY_DRIVE_MIN_MOVE_M = "driveMinMoveM";
     public static final String KEY_PAUSED = "paused";
     public static final String KEY_SERVER_UPLOAD = "serverUploadEnabled";
+    public static final String KEY_LAST_ROUTE_SEND_MS = "lastRouteSendMs";
+    public static final String KEY_LAST_KEEPALIVE_SEND_MS = "lastKeepaliveSendMs";
+    public static final String KEY_COMPASS_HEADING = "compassHeading";
+    public static final String KEY_COMPASS_HEADING_AT_MS = "compassHeadingAtMs";
 
     private static final int NOTIFICATION_ID = 28352;
     private static final int LIVE_NOTIFICATION_ID = 28353;
     private static final String CHANNEL_ID = "native_gps_upload_channel";
     private static final double STATIONARY_SPEED_KMH = 1.2;
+    private static final long LIVE_MQTT_BACKOFF_SKIP_LOG_MS = 10000L;
+    private static final long WAKE_LOCK_ALREADY_HELD_LOG_MS = 30000L;
+    private static final long COMPASS_HEADING_FRESH_MS = 8000L;
+    private static final String EXTRA_MOVEMENT_DISTANCE_M = "movementDistanceM";
+    private static final String EXTRA_MOVEMENT_SPEED_KMH = "movementSpeedKmh";
+    private static final String EXTRA_MOVEMENT_BEARING = "movementBearing";
+    private static final String EXTRA_MOVEMENT_TIME_MS = "movementTimeMs";
 
     private FusedLocationProviderClient fusedClient;
     private LocationCallback locationCallback;
     private final ExecutorService uploadExecutor = Executors.newSingleThreadExecutor();
 
     private long lastSendMs = 0;
+    private long lastRouteSendMs = 0;
+    private long lastKeepaliveSendMs = 0;
+    private long liveMqttBackoffUntilMs = 0;
+    private int liveMqttFailureCount = 0;
+    private long lastLiveMqttBackoffLogMs = 0;
     private Double lastLat = null;
     private Double lastLon = null;
     private Double stableLat = null;
@@ -91,7 +116,26 @@ public class NativeGpsUploadService extends Service {
     private Long stableTimeMs = null;
     private Float lastAcceptedSpeedKmh = null;
     private int stationaryExitCount = 0;
+    private boolean driveModeActive = false;
+    private int driveConfirmStreak = 0;
+    private long driveExitSinceMs = 0;
+    private Double lastMovementHoldHeading = null;
     private PowerManager.WakeLock wakeLock = null;
+    private long wakeLockHeldSinceMs = 0;
+    private String wakeLockHeldMode = "unknown";
+    private long lastWakeLockAlreadyHeldLogMs = 0;
+
+    private static class EffectiveHeading {
+        final Double value;
+        final String source;
+        final String mode;
+
+        EffectiveHeading(Double value, String source, String mode) {
+            this.value = value;
+            this.source = source;
+            this.mode = mode;
+        }
+    }
 
     private static class RouteDecision {
         final boolean accept;
@@ -113,18 +157,22 @@ public class NativeGpsUploadService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        if (intent != null && ACTION_FLUSH_UPLOAD_QUEUE.equals(intent.getAction())) {
+            uploadExecutor.execute(() -> flushUploadQueue(prefs));
+            return START_NOT_STICKY;
+        }
         boolean shouldRun = prefs.getBoolean(KEY_ENABLED, false) &&
             (prefs.getBoolean(KEY_TRACKING, false) || prefs.getBoolean(KEY_SERVER_UPLOAD, false));
         if (!shouldRun) {
             cancelExtraNotifications();
-            releaseWakeLock();
+            releaseWakeLock("invalid-mode");
             stopSelf();
             return START_NOT_STICKY;
         }
         prefs.edit().putBoolean(KEY_PAUSED, false).apply();
         startForeground(NOTIFICATION_ID, buildNotification(prefs));
         syncExtraNotifications(prefs);
-        acquireWakeLock();
+        acquireWakeLock(prefs);
         startLocationUpdates();
         return START_STICKY;
     }
@@ -151,7 +199,7 @@ public class NativeGpsUploadService extends Service {
     public void onDestroy() {
         stopLocationUpdates();
         cancelExtraNotifications();
-        releaseWakeLock();
+        releaseWakeLock("destroy");
         uploadExecutor.shutdownNow();
         super.onDestroy();
     }
@@ -255,8 +303,28 @@ public class NativeGpsUploadService extends Service {
         if (manager != null) manager.cancel(LIVE_NOTIFICATION_ID);
     }
 
-    private void acquireWakeLock() {
-        if (wakeLock != null && wakeLock.isHeld()) return;
+    private String wakeLockMode(SharedPreferences prefs) {
+        if (prefs == null) return "unknown";
+        if (prefs.getBoolean(KEY_TRACKING, false)) return "tracking";
+        if (prefs.getBoolean(KEY_SERVER_UPLOAD, false)) return "serverUpload";
+        return "unknown";
+    }
+
+    private long wakeLockHeldMs(long now) {
+        return wakeLockHeldSinceMs > 0 ? Math.max(0L, now - wakeLockHeldSinceMs) : -1L;
+    }
+
+    private void acquireWakeLock(SharedPreferences prefs) {
+        String mode = wakeLockMode(prefs);
+        long now = System.currentTimeMillis();
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLockHeldMode = mode;
+            if (now - lastWakeLockAlreadyHeldLogMs >= WAKE_LOCK_ALREADY_HELD_LOG_MS) {
+                Log.i(TAG, "wakeLock action=alreadyHeld mode=" + mode + " heldMs=" + wakeLockHeldMs(now));
+                lastWakeLockAlreadyHeldLogMs = now;
+            }
+            return;
+        }
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
         if (powerManager == null) return;
         wakeLock = powerManager.newWakeLock(
@@ -266,26 +334,44 @@ public class NativeGpsUploadService extends Service {
         wakeLock.setReferenceCounted(false);
         try {
             wakeLock.acquire();
+            wakeLockHeldSinceMs = System.currentTimeMillis();
+            wakeLockHeldMode = mode;
+            lastWakeLockAlreadyHeldLogMs = 0;
+            Log.i(TAG, "wakeLock action=acquire mode=" + mode + " timeoutMs=none");
         } catch (SecurityException ignored) {
             wakeLock = null;
+            wakeLockHeldSinceMs = 0;
+            wakeLockHeldMode = "unknown";
+            lastWakeLockAlreadyHeldLogMs = 0;
         }
     }
 
-    private void releaseWakeLock() {
+    private void releaseWakeLock(String reason) {
         if (wakeLock != null && wakeLock.isHeld()) {
+            long now = System.currentTimeMillis();
+            long heldMs = wakeLockHeldMs(now);
+            String mode = wakeLockHeldMode != null ? wakeLockHeldMode : "unknown";
             wakeLock.release();
+            Log.i(TAG, "wakeLock action=release mode=" + mode + " heldMs=" + heldMs + " reason=" + (reason != null ? reason : "unknown"));
         }
         wakeLock = null;
+        wakeLockHeldSinceMs = 0;
+        wakeLockHeldMode = "unknown";
+        lastWakeLockAlreadyHeldLogMs = 0;
     }
 
     private void startLocationUpdates() {
         stopLocationUpdates();
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         long movingMs = Math.max(200L, Math.round(doublePref(prefs, KEY_MOVING_SEC, 0.5, 0.2, 60.0) * 1000.0));
-        LocationRequest request = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, movingMs)
-            .setMinUpdateIntervalMillis(movingMs)
+        boolean tracking = prefs.getBoolean(KEY_TRACKING, false);
+        boolean uploadEnabled = prefs.getBoolean(KEY_SERVER_UPLOAD, false);
+        long intervalMs = tracking ? movingMs : (uploadEnabled ? keepaliveSendIntervalMs(prefs) : movingMs);
+        Log.i(TAG, "locationRequest mode=" + (tracking ? "tracking" : "serverUpload") + " intervalMs=" + intervalMs);
+        LocationRequest request = new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
+            .setMinUpdateIntervalMillis(intervalMs)
             .setMinUpdateDistanceMeters(0f)
-            .setMaxUpdateDelayMillis(movingMs)
+            .setMaxUpdateDelayMillis(intervalMs)
             .build();
         locationCallback = new LocationCallback() {
             @Override
@@ -312,19 +398,128 @@ public class NativeGpsUploadService extends Service {
         boolean tracking = prefs.getBoolean(KEY_TRACKING, false);
         boolean uploadEnabled = prefs.getBoolean(KEY_SERVER_UPLOAD, false);
         if (!tracking && !uploadEnabled) return;
-        if (!tracking) {
-            if (!liveLocationAccepted(location)) return;
-            uploadExecutor.execute(() -> publishLiveLocation(location, prefs));
-            return;
-        }
+        if (!liveLocationAccepted(location)) return;
+        lastRouteSendMs = prefs.getLong(KEY_LAST_ROUTE_SEND_MS, lastRouteSendMs);
+        lastKeepaliveSendMs = prefs.getLong(KEY_LAST_KEEPALIVE_SEND_MS, lastKeepaliveSendMs);
+
         Location stableLocation = stabilizeLocation(location, prefs);
         if (stableLocation == null) return;
-        RouteDecision decision = routePointDecision(stableLocation, prefs);
-        if (!decision.accept) {
-            if (uploadEnabled) uploadExecutor.execute(() -> publishLiveLocation(stableLocation, prefs));
-            return;
+        if (tracking) {
+            RouteDecision decision = routePointDecision(stableLocation, prefs);
+            if (decision.accept) {
+                uploadExecutor.execute(() -> publishLocation(stableLocation, prefs, decision));
+            }
         }
-        uploadExecutor.execute(() -> publishLocation(stableLocation, prefs, decision));
+        if (uploadEnabled) {
+            Location uploadLocation = stableLocation;
+            uploadExecutor.execute(() -> tickServerUpload(uploadLocation, prefs));
+        }
+    }
+
+    private long routeSendIntervalMs(SharedPreferences prefs) {
+        double intervalMin = doublePref(prefs, KEY_INTERVAL_MIN, 0.0, 0.0, 1440.0);
+        if (intervalMin > 0.0) return (long) (intervalMin * 60.0 * 1000.0);
+        return Math.max(200L, Math.round(doublePref(prefs, KEY_MOVING_SEC, 0.5, 0.2, 60.0) * 1000.0));
+    }
+
+    private long keepaliveSendIntervalMs(SharedPreferences prefs) {
+        double intervalMin = doublePref(prefs, KEY_INTERVAL_MIN, 0.0, 0.0, 1440.0);
+        if (intervalMin > 0.0) return (long) (intervalMin * 60.0 * 1000.0);
+        return Math.max(1000L, Math.round(doublePref(prefs, KEY_IDLE_SEC, 2.0, 1.0, 3600.0) * 1000.0));
+    }
+
+    private boolean isRouteSendDue(SharedPreferences prefs) {
+        long intervalMs = routeSendIntervalMs(prefs);
+        return lastRouteSendMs <= 0 || System.currentTimeMillis() - lastRouteSendMs >= intervalMs;
+    }
+
+    private boolean isKeepaliveSendDue(SharedPreferences prefs) {
+        long intervalMs = keepaliveSendIntervalMs(prefs);
+        return lastKeepaliveSendMs <= 0 || System.currentTimeMillis() - lastKeepaliveSendMs >= intervalMs;
+    }
+
+    private long liveMqttBackoffCooldownMs(int failureCount) {
+        if (failureCount <= 1) return 5000L;
+        if (failureCount == 2) return 15000L;
+        if (failureCount == 3) return 30000L;
+        return 60000L;
+    }
+
+    private void tickServerUpload(Location stableLocation, SharedPreferences prefs) {
+        if (!prefs.getBoolean(KEY_SERVER_UPLOAD, false) || stableLocation == null) return;
+        String deviceKey = prefs.getString(KEY_DEVICE_KEY, "");
+        if (deviceKey.isEmpty()) return;
+        try {
+            String topic = mqttTopic(prefs, deviceKey);
+            if (topic.isEmpty()) return;
+            JSONArray queue = readMqttQueue(prefs);
+            if (queue.length() > 0) {
+                if (!isRouteSendDue(prefs)) return;
+                JSONObject payload = queue.optJSONObject(0);
+                if (payload == null) return;
+                if (publishMqtt(prefs, topic, payload.toString(), payload.optLong("sequenceNumber", 1L))) {
+                    JSONArray remaining = new JSONArray();
+                    for (int i = 1; i < queue.length(); i += 1) {
+                        remaining.put(queue.opt(i));
+                    }
+                    writeMqttQueue(prefs, remaining);
+                    lastRouteSendMs = System.currentTimeMillis();
+                    lastSendMs = lastRouteSendMs;
+                    prefs.edit().putLong(KEY_LAST_ROUTE_SEND_MS, lastRouteSendMs).apply();
+                }
+                return;
+            }
+            if (!isKeepaliveSendDue(prefs)) return;
+            long now = System.currentTimeMillis();
+            if (now < liveMqttBackoffUntilMs) {
+                if (now - lastLiveMqttBackoffLogMs >= LIVE_MQTT_BACKOFF_SKIP_LOG_MS) {
+                    Log.i(TAG, "mqttBackoff action=skip kind=live untilMs=" + liveMqttBackoffUntilMs);
+                    lastLiveMqttBackoffLogMs = now;
+                }
+                return;
+            }
+            JSONObject payload = livePayloadJson(stableLocation, deviceKey, prefs);
+            if (publishMqtt(prefs, topic, payload.toString(), payload.optLong("timestamp", System.currentTimeMillis()))) {
+                if (liveMqttFailureCount > 0 || liveMqttBackoffUntilMs > 0) {
+                    Log.i(TAG, "mqttBackoff action=reset kind=live");
+                }
+                liveMqttFailureCount = 0;
+                liveMqttBackoffUntilMs = 0;
+                lastLiveMqttBackoffLogMs = 0;
+                lastKeepaliveSendMs = System.currentTimeMillis();
+                lastSendMs = lastKeepaliveSendMs;
+                prefs.edit().putLong(KEY_LAST_KEEPALIVE_SEND_MS, lastKeepaliveSendMs).apply();
+                lastLat = stableLocation.getLatitude();
+                lastLon = stableLocation.getLongitude();
+            } else {
+                liveMqttFailureCount += 1;
+                long cooldownMs = liveMqttBackoffCooldownMs(liveMqttFailureCount);
+                liveMqttBackoffUntilMs = System.currentTimeMillis() + cooldownMs;
+                lastLiveMqttBackoffLogMs = 0;
+                Log.w(TAG, "mqttBackoff action=start kind=live cooldownMs=" + cooldownMs + " failures=" + liveMqttFailureCount);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void flushUploadQueue(SharedPreferences prefs) {
+        String deviceKey = prefs.getString(KEY_DEVICE_KEY, "");
+        if (deviceKey.isEmpty() || !prefs.getBoolean(KEY_SERVER_UPLOAD, false)) return;
+        String topic = mqttTopic(prefs, deviceKey);
+        if (topic.isEmpty()) return;
+        JSONArray queue = readMqttQueue(prefs);
+        while (queue.length() > 0) {
+            JSONObject payload = queue.optJSONObject(0);
+            if (payload == null) break;
+            if (!publishMqtt(prefs, topic, payload.toString(), payload.optLong("sequenceNumber", 1L))) break;
+            JSONArray remaining = new JSONArray();
+            for (int i = 1; i < queue.length(); i += 1) {
+                remaining.put(queue.opt(i));
+            }
+            queue = remaining;
+            writeMqttQueue(prefs, queue);
+            lastRouteSendMs = System.currentTimeMillis();
+        }
+        prefs.edit().putLong(KEY_LAST_ROUTE_SEND_MS, lastRouteSendMs).apply();
     }
 
     private boolean liveLocationAccepted(Location location) {
@@ -364,9 +559,13 @@ public class NativeGpsUploadService extends Service {
             speedKmh = inferredSpeedKmh;
             location.setSpeed((float) (speedKmh / 3.6));
         }
-        if (speedKmh >= walkingSpeed && distance >= Math.min(minMoveM, 0.8)) {
-            location.setBearing((float) bearingDegrees(stableLat, stableLon, location.getLatitude(), location.getLongitude()));
+        Double movementBearing = distance >= Math.min(minMoveM, 0.8)
+            ? bearingDegrees(stableLat, stableLon, location.getLatitude(), location.getLongitude())
+            : null;
+        if (speedKmh >= walkingSpeed && movementBearing != null) {
+            location.setBearing(movementBearing.floatValue());
         }
+        writeMovementSnapshot(location, distance, speedKmh, movementBearing, pointTimeMs);
         if (location.hasAccuracy() && location.getAccuracy() > maxAccuracyM) return fixedStationaryLocation(location);
         boolean speedMotionCandidate = speedKmh >= walkingSpeed && distance >= Math.min(minMoveM, 0.8);
         boolean movingNow = distance > driftRadius || (speedKmh >= movingSpeed && distance >= 1.5)
@@ -459,10 +658,216 @@ public class NativeGpsUploadService extends Service {
         double d = Math.abs(a - b) % 360.0;
         return d > 180.0 ? 360.0 - d : d;
     }
+    private void writeMovementSnapshot(Location location, double distanceM, double speedKmh, Double movementBearing, long timestampMs) {
+        if (location == null) return;
+        Bundle extras = location.getExtras();
+        if (extras == null) extras = new Bundle();
+        extras.putDouble(EXTRA_MOVEMENT_DISTANCE_M, distanceM);
+        extras.putDouble(EXTRA_MOVEMENT_SPEED_KMH, speedKmh);
+        if (movementBearing != null) {
+            extras.putDouble(EXTRA_MOVEMENT_BEARING, movementBearing);
+        } else {
+            extras.remove(EXTRA_MOVEMENT_BEARING);
+        }
+        extras.putLong(EXTRA_MOVEMENT_TIME_MS, timestampMs);
+        location.setExtras(extras);
+    }
+
+    private boolean isFinite(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value);
+    }
+
+    private boolean movementSnapshotProvesWalking(Bundle movementSnapshot, SharedPreferences prefs) {
+        if (movementSnapshot == null ||
+            !movementSnapshot.containsKey(EXTRA_MOVEMENT_SPEED_KMH) ||
+            !movementSnapshot.containsKey(EXTRA_MOVEMENT_DISTANCE_M)) {
+            return false;
+        }
+        double snapshotSpeedKmh = movementSnapshot.getDouble(EXTRA_MOVEMENT_SPEED_KMH);
+        double snapshotDistanceM = movementSnapshot.getDouble(EXTRA_MOVEMENT_DISTANCE_M);
+        double walkingSpeed = doublePref(prefs, KEY_WALKING_SPEED_KMH, 1.6, 0.5, 8.0);
+        double minMove = Math.min(doublePref(prefs, KEY_MIN_MOVE_M, 1.0, 0.2, 20.0), 0.8);
+        return isFinite(snapshotSpeedKmh) && isFinite(snapshotDistanceM) &&
+            snapshotSpeedKmh >= walkingSpeed && snapshotDistanceM >= minMove;
+    }
+
+    private Double readFreshCompassHeading(SharedPreferences prefs) {
+        if (prefs == null) return null;
+        float heading = prefs.getFloat(KEY_COMPASS_HEADING, Float.NaN);
+        long timestampMs = prefs.getLong(KEY_COMPASS_HEADING_AT_MS, 0L);
+        if (Float.isNaN(heading) || Float.isInfinite(heading) || heading < 0f || heading >= 360f) return null;
+        if (timestampMs <= 0L) return null;
+        long ageMs = System.currentTimeMillis() - timestampMs;
+        if (ageMs < 0L || ageMs > COMPASS_HEADING_FRESH_MS) return null;
+        return (double) heading;
+    }
+    private void updateDriveModeState(double speedKmh, double distanceM, long timestampMs, SharedPreferences prefs) {
+        double enterSpeed = doublePref(prefs, KEY_DRIVE_ENTER_SPEED_KMH, 10.0, 5.0, 40.0);
+        double exitSpeed = doublePref(prefs, KEY_DRIVE_EXIT_SPEED_KMH, 6.0, 3.0, 30.0);
+        double minMove = doublePref(prefs, KEY_DRIVE_MIN_MOVE_M, 1.0, 0.2, 20.0);
+        int confirmFixes = intPref(prefs, KEY_DRIVE_CONFIRM_FIXES, 3, 2, 6);
+        long exitHoldMs = (long) doublePref(prefs, KEY_DRIVE_EXIT_HOLD_MS, 4000.0, 1000.0, 15000.0);
+        if (speedKmh >= enterSpeed && distanceM >= minMove) {
+            driveConfirmStreak += 1;
+            driveExitSinceMs = 0;
+            if (driveConfirmStreak >= confirmFixes) {
+                driveModeActive = true;
+            }
+            return;
+        }
+        if (speedKmh < exitSpeed) {
+            driveConfirmStreak = 0;
+            if (driveModeActive) {
+                if (driveExitSinceMs <= 0) {
+                    driveExitSinceMs = timestampMs;
+                } else if (timestampMs - driveExitSinceMs >= exitHoldMs) {
+                    driveModeActive = false;
+                    driveExitSinceMs = 0;
+                }
+            }
+            return;
+        }
+        if (!driveModeActive) {
+            driveConfirmStreak = 0;
+        }
+    }
+
+    private String resolveMovementMode(double speedKmh, double distanceM, boolean movingNow, SharedPreferences prefs) {
+        if (driveModeActive) return "drive";
+        double walkingSpeed = doublePref(prefs, KEY_WALKING_SPEED_KMH, 1.6, 0.5, 8.0);
+        double minMove = Math.min(doublePref(prefs, KEY_MIN_MOVE_M, 1.0, 0.2, 20.0), 0.8);
+        if (movingNow || (speedKmh >= walkingSpeed && distanceM >= minMove)) {
+            return "walk";
+        }
+        return "stationary";
+    }
+
+    private EffectiveHeading resolveEffectiveHeading(Location location, SharedPreferences prefs) {
+        Double compassHeading = readFreshCompassHeading(prefs);
+        if (location == null || stableLat == null || stableLon == null) {
+            if (location != null && location.hasBearing()) {
+                return new EffectiveHeading((double) location.getBearing(), "gps", "walk");
+            }
+            if (compassHeading != null) {
+                return new EffectiveHeading(compassHeading, "compass", "stationary");
+            }
+            return new EffectiveHeading(lastMovementHoldHeading, "hold", "stationary");
+        }
+        Bundle movementSnapshot = location.getExtras();
+        boolean hasMovementSnapshot = movementSnapshot != null && movementSnapshot.containsKey(EXTRA_MOVEMENT_DISTANCE_M);
+        double distanceM = hasMovementSnapshot
+            ? movementSnapshot.getDouble(EXTRA_MOVEMENT_DISTANCE_M)
+            : distanceMeters(stableLat, stableLon, location.getLatitude(), location.getLongitude());
+        if (!isFinite(distanceM)) distanceM = 0.0;
+        double speedKmh = speedKmh(location);
+        if (hasMovementSnapshot && speedKmh <= 0.0 && movementSnapshot.containsKey(EXTRA_MOVEMENT_SPEED_KMH)) {
+            double snapshotSpeedKmh = movementSnapshot.getDouble(EXTRA_MOVEMENT_SPEED_KMH);
+            if (isFinite(snapshotSpeedKmh)) speedKmh = snapshotSpeedKmh;
+        }
+        if (speedKmh <= 0 && stableTimeMs != null) {
+            long snapshotPointTimeMs = hasMovementSnapshot && movementSnapshot.containsKey(EXTRA_MOVEMENT_TIME_MS)
+                ? movementSnapshot.getLong(EXTRA_MOVEMENT_TIME_MS)
+                : (location.getTime() > 0 ? location.getTime() : System.currentTimeMillis());
+            double dtSeconds = Math.max(0.2, (snapshotPointTimeMs - stableTimeMs) / 1000.0);
+            if (dtSeconds < 20.0 && distanceM > 0) {
+                double inferredSpeedKmh = distanceM / dtSeconds * 3.6;
+                double walkingSpeed = doublePref(prefs, KEY_WALKING_SPEED_KMH, 1.6, 0.5, 8.0);
+                if (inferredSpeedKmh >= walkingSpeed) {
+                    speedKmh = inferredSpeedKmh;
+                }
+            }
+        }
+        long pointTimeMs = hasMovementSnapshot && movementSnapshot.containsKey(EXTRA_MOVEMENT_TIME_MS)
+            ? movementSnapshot.getLong(EXTRA_MOVEMENT_TIME_MS)
+            : (location.getTime() > 0 ? location.getTime() : System.currentTimeMillis());
+        updateDriveModeState(speedKmh, distanceM, pointTimeMs, prefs);
+        double minMove = Math.min(doublePref(prefs, KEY_MIN_MOVE_M, 1.0, 0.2, 20.0), 0.8);
+        double walkingSpeed = doublePref(prefs, KEY_WALKING_SPEED_KMH, 1.6, 0.5, 8.0);
+        double movingSpeed = doublePref(prefs, KEY_MOVING_SPEED_KMH, 3.0, walkingSpeed, 30.0);
+        boolean movingNow = distanceM >= minMove && speedKmh >= walkingSpeed;
+        String mode = resolveMovementMode(speedKmh, distanceM, movingNow, prefs);
+        Double moveHeading = null;
+        if (distanceM >= minMove) {
+            if (hasMovementSnapshot && movementSnapshot.containsKey(EXTRA_MOVEMENT_BEARING)) {
+                double snapshotBearing = movementSnapshot.getDouble(EXTRA_MOVEMENT_BEARING);
+                if (isFinite(snapshotBearing)) moveHeading = snapshotBearing;
+            }
+            if (moveHeading == null) {
+                moveHeading = bearingDegrees(stableLat, stableLon, location.getLatitude(), location.getLongitude());
+            }
+        }
+        Double gpsBearing = location.hasBearing() ? (double) location.getBearing() : null;
+        Double value = null;
+        String source = "hold";
+        if ("drive".equals(mode)) {
+            if (moveHeading != null) {
+                value = moveHeading;
+                source = "movement";
+            } else if (gpsBearing != null) {
+                value = gpsBearing;
+                source = "gps";
+            } else if (lastMovementHoldHeading != null) {
+                value = lastMovementHoldHeading;
+                source = "hold";
+            }
+        } else if ("walk".equals(mode)) {
+            boolean weakWalk = speedKmh < movingSpeed;
+            if (weakWalk && compassHeading != null) {
+                value = compassHeading;
+                source = "compass";
+            } else if (moveHeading != null) {
+                value = moveHeading;
+                source = "movement";
+            } else if (gpsBearing != null) {
+                value = gpsBearing;
+                source = "gps";
+            } else if (compassHeading != null) {
+                value = compassHeading;
+                source = "compass";
+            } else if (lastMovementHoldHeading != null) {
+                value = lastMovementHoldHeading;
+                source = "hold";
+            }
+        } else {
+            if (compassHeading != null) {
+                value = compassHeading;
+                source = "compass";
+            } else if (lastMovementHoldHeading != null) {
+                value = lastMovementHoldHeading;
+                source = "hold";
+            }
+        }
+        if (value != null && ("movement".equals(source) || "gps".equals(source))) {
+            lastMovementHoldHeading = value;
+            location.setBearing(value.floatValue());
+        }
+        return new EffectiveHeading(value, source, mode);
+    }
+
+    private void putHeadingFields(JSONObject point, Location location, SharedPreferences prefs) throws Exception {
+        EffectiveHeading effective = resolveEffectiveHeading(location, prefs);
+        if (effective.value != null) {
+            point.put("heading", effective.value);
+        } else {
+            point.put("heading", JSONObject.NULL);
+        }
+        point.put("headingSource", effective.source);
+        point.put("headingMode", effective.mode);
+        point.put("driveModeActive", driveModeActive);
+    }
 
     private double speedKmh(Location location) {
         if (!location.hasSpeed()) return 0.0;
         return location.getSpeed() <= 60f ? location.getSpeed() * 3.6 : location.getSpeed();
+    }
+
+    private Double payloadSpeedKmh(Location location, SharedPreferences prefs) {
+        if (location == null) return null;
+        Bundle movementSnapshot = location.getExtras();
+        if (movementSnapshotProvesWalking(movementSnapshot, prefs)) {
+            return movementSnapshot.getDouble(EXTRA_MOVEMENT_SPEED_KMH);
+        }
+        return location.hasSpeed() ? speedKmh(location) : null;
     }
 
     private double routeDistanceTargetMeters(Location location, SharedPreferences prefs, boolean headingChanged) {
@@ -540,29 +945,11 @@ public class NativeGpsUploadService extends Service {
             appendLocalRoutePoint(prefs, payload);
             enqueueMqttPayload(prefs, payload);
             if (!prefs.getBoolean(KEY_SERVER_UPLOAD, true)) return;
-            String topic = mqttTopic(prefs, deviceKey);
-            if (topic.isEmpty()) return;
-            flushQueuedPoints(prefs, topic);
-            lastSendMs = System.currentTimeMillis();
-            lastLat = location.getLatitude();
-            lastLon = location.getLongitude();
         } catch (Exception ignored) {}
     }
 
     private void publishLiveLocation(Location location, SharedPreferences prefs) {
-        if (!prefs.getBoolean(KEY_SERVER_UPLOAD, false)) return;
-        String deviceKey = prefs.getString(KEY_DEVICE_KEY, "");
-        if (deviceKey.isEmpty()) return;
-        try {
-            String topic = mqttTopic(prefs, deviceKey);
-            if (topic.isEmpty()) return;
-            JSONObject payload = livePayloadJson(location, deviceKey);
-            if (publishMqtt(prefs, topic, payload.toString(), payload.optLong("timestamp", System.currentTimeMillis()))) {
-                lastSendMs = System.currentTimeMillis();
-                lastLat = location.getLatitude();
-                lastLon = location.getLongitude();
-            }
-        } catch (Exception ignored) {}
+        tickServerUpload(location, prefs);
     }
 
     private JSONObject trackPayloadJson(Location location, SharedPreferences prefs, String deviceKey, RouteDecision decision) throws Exception {
@@ -570,12 +957,13 @@ public class NativeGpsUploadService extends Service {
         point.put("lat", location.getLatitude());
         point.put("lon", location.getLongitude());
         point.put("timestamp", location.getTime() > 0 ? location.getTime() : System.currentTimeMillis());
-        point.put("speed", location.hasSpeed()
-            ? (location.getSpeed() <= 60f ? location.getSpeed() * 3.6 : location.getSpeed())
-            : JSONObject.NULL);
-        point.put("heading", location.hasBearing() ? location.getBearing() : JSONObject.NULL);
+        Double payloadSpeed = payloadSpeedKmh(location, prefs);
+        point.put("speed", payloadSpeed != null ? payloadSpeed : JSONObject.NULL);
+        putHeadingFields(point, location, prefs);
         point.put("accuracy", location.hasAccuracy() ? location.getAccuracy() : JSONObject.NULL);
         point.put("source", "mobile_app");
+        point.put("_publisher", "native");
+        point.put("localTracking", prefs.getBoolean(KEY_TRACKING, false));
         point.put("trackId", ensureTrackId(prefs, deviceKey));
         point.put("sequenceNumber", nextSequenceNumber(prefs));
         point.put("routePoint", true);
@@ -586,18 +974,19 @@ public class NativeGpsUploadService extends Service {
         return point;
     }
 
-    private JSONObject livePayloadJson(Location location, String deviceKey) throws Exception {
+    private JSONObject livePayloadJson(Location location, String deviceKey, SharedPreferences prefs) throws Exception {
         long timestamp = location.getTime() > 0 ? location.getTime() : System.currentTimeMillis();
         JSONObject point = new JSONObject();
         point.put("lat", location.getLatitude());
         point.put("lon", location.getLongitude());
         point.put("timestamp", timestamp);
-        point.put("speed", location.hasSpeed()
-            ? (location.getSpeed() <= 60f ? location.getSpeed() * 3.6 : location.getSpeed())
-            : JSONObject.NULL);
-        point.put("heading", location.hasBearing() ? location.getBearing() : JSONObject.NULL);
+        Double payloadSpeed = payloadSpeedKmh(location, prefs);
+        point.put("speed", payloadSpeed != null ? payloadSpeed : JSONObject.NULL);
+        putHeadingFields(point, location, prefs);
         point.put("accuracy", location.hasAccuracy() ? location.getAccuracy() : JSONObject.NULL);
         point.put("source", "mobile_app");
+        point.put("_publisher", "native");
+        point.put("localTracking", prefs.getBoolean(KEY_TRACKING, false));
         point.put("trackId", JSONObject.NULL);
         point.put("sequenceNumber", timestamp);
         point.put("routePoint", false);

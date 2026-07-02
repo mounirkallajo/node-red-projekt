@@ -1,0 +1,258 @@
+@startuml GPS_Tracking_Komponentendiagramm
+' UML-Komponentendiagramm – Bachelorarbeit
+' Notation: Gane-Sarson-kompatibel, PlantUML Component Diagram
+' Export: plantuml -tsvg docs/uml-komponentendiagramm.puml
+
+top to bottom direction
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 0
+skinparam linetype ortho
+skinparam defaultFontSize 10
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam nodesep 40
+skinparam ranksep 50
+skinparam ArrowColor #000000
+skinparam BorderColor #000000
+skinparam FontColor #000000
+skinparam PackageBorderColor #000000
+skinparam ComponentBorderColor #000000
+skinparam ComponentBackgroundColor #FFFFFF
+skinparam PackageBackgroundColor #FFFFFF
+skinparam InterfaceBackgroundColor #FFFFFF
+skinparam InterfaceBorderColor #000000
+
+title UML-Komponentendiagramm – GPS-Tracking- und Überwachungssystem
+
+' ============================================================
+' Bereitgestellte Schnittstellen (Lollipop)
+' ============================================================
+() "IGPS" as IGPS
+() "IMQTTClient" as IMQTTClient
+() "ITrackingLogic" as ITrackingLogic
+() "IOfflineMaps" as IOfflineMaps
+() "ISync" as ISync
+() "IMapLogic" as IMapLogic
+
+() "IMQTTBroker" as IMQTTBroker
+() "IREST" as IREST
+() "IWebSocket" as IWebSocket
+() "ICameraProxy" as ICameraProxy
+() "ITrackingProcess" as ITrackingProcess
+
+() "IPersistence" as IPersistence
+() "IDeviceRegistry" as IDeviceRegistry
+() "IFlowContext" as IFlowContext
+
+() "IMapDisplay" as IMapDisplay
+() "ITrackingView" as ITrackingView
+() "IHistoryView" as IHistoryView
+() "ICameraView" as ICameraView
+
+() "IVideoStream" as IVideoStream
+() "ISnapshot" as ISnapshot
+() "INetworkAccess" as INetworkAccess
+
+() "IVPN" as IVPN
+() "IMapTiles" as IMapTiles
+() "IConnectivity" as IConnectivity
+
+' ============================================================
+' Mobile Anwendung
+' ============================================================
+package "Mobile Anwendung" {
+  component "Mobile App" as MobileApp <<component>>
+  component "Tracking-Logik" as MobileTracking <<component>>
+  component "GPS-Modul" as GPSModul <<component>>
+  component "MQTT-Client" as MQTTClient <<component>>
+  component "Offline-Karten" as OfflineMaps <<component>>
+  component "Synchronisationsmodul" as SyncModul <<component>>
+}
+
+' ============================================================
+' Gemeinsame Kartenlogik (geteilt)
+' ============================================================
+package "Gemeinsame Präsentationslogik" {
+  component "Maplogik\n(Gemeinsame Kartenlogik)" as Maplogik <<component>>
+}
+
+' ============================================================
+' Backend-System
+' ============================================================
+package "Backend-System" {
+  component "Node-RED" as NodeRED <<component>>
+  component "REST-API" as RestAPI <<component>>
+  component "MQTT-Adapter" as MQTTAdapter <<component>>
+  component "WebSocket-Service" as WSService <<component>>
+  component "Kamera-Proxy" as CameraProxy <<component>>
+}
+
+' ============================================================
+' Datenhaltung
+' ============================================================
+package "Datenhaltung" {
+  component "InfluxDB" as InfluxDB <<component>>
+  component "Device Registry" as DeviceRegistry <<component>>
+  component "Flow Context" as FlowContext <<component>>
+}
+
+' ============================================================
+' Webanwendung
+' ============================================================
+package "Webanwendung" {
+  component "MapLibre Map UI" as MapUI <<component>>
+  component "Tracking UI" as TrackingUI <<component>>
+  component "Historie" as HistoryUI <<component>>
+  component "Kamera-Panel" as CameraPanel <<component>>
+}
+
+' ============================================================
+' Kamerasystem
+' ============================================================
+package "Kamerasystem" {
+  component "ESP32-CAM" as ESP32 <<component>>
+  component "Smartphone-Hotspot" as Hotspot <<component>>
+  component "Tailscale-Kamerazugriff" as TailscaleCam <<component>>
+}
+
+' ============================================================
+' Externe Dienste
+' ============================================================
+package "Externe Dienste" {
+  component "Tailscale VPN" as Tailscale <<component>>
+  component "MapTiler" as MapTiler <<component>>
+  component "OpenStreetMap\n(Fallback)" as OSM <<component>>
+  component "Mobilfunknetz" as MobileNet <<component>>
+}
+
+' ============================================================
+' Schnittstellen-Zuordnung (Provided = Lollipop an Komponente)
+' ============================================================
+GPSModul -0)- IGPS
+MobileTracking -0)- ITrackingLogic
+MQTTClient -0)- IMQTTClient
+OfflineMaps -0)- IOfflineMaps
+SyncModul -0)- ISync
+Maplogik -0)- IMapLogic
+
+MQTTAdapter -0)- IMQTTBroker
+RestAPI -0)- IREST
+WSService -0)- IWebSocket
+CameraProxy -0)- ICameraProxy
+NodeRED -0)- ITrackingProcess
+
+InfluxDB -0)- IPersistence
+DeviceRegistry -0)- IDeviceRegistry
+FlowContext -0)- IFlowContext
+
+MapUI -0)- IMapDisplay
+TrackingUI -0)- ITrackingView
+HistoryUI -0)- IHistoryView
+CameraPanel -0)- ICameraView
+
+ESP32 -0)- IVideoStream
+ESP32 -0)- ISnapshot
+Hotspot -0)- INetworkAccess
+TailscaleCam -0)- INetworkAccess
+
+Tailscale -0)- IVPN
+MapTiler -0)- IMapTiles
+OSM -0)- IMapTiles
+MobileNet -0)- IConnectivity
+
+' ============================================================
+' Mobile App – interne Abhängigkeiten (Required = Socket)
+' ============================================================
+MobileApp -0-( IGPS
+MobileApp -0-( ITrackingLogic
+MobileApp -0-( IMQTTClient
+MobileApp -0-( IOfflineMaps
+MobileApp -0-( ISync
+MobileApp -0-( IMapLogic
+
+' ============================================================
+' Mobile ↔ Backend
+' ============================================================
+MQTTClient -0-( IMQTTBroker
+SyncModul -0-( IREST
+SyncModul -0-( IWebSocket
+
+' ============================================================
+' Backend intern
+' ============================================================
+MQTTAdapter -0-( ITrackingProcess
+RestAPI -0-( ITrackingProcess
+WSService -0-( ITrackingProcess
+CameraProxy -0-( ITrackingProcess
+
+' ============================================================
+' Backend ↔ Datenhaltung
+' ============================================================
+NodeRED -0-( IPersistence
+NodeRED -0-( IDeviceRegistry
+NodeRED -0-( IFlowContext
+
+' ============================================================
+' Webanwendung
+' ============================================================
+MapUI -0-( IMapLogic
+TrackingUI -0-( ITrackingView
+HistoryUI -0-( IHistoryView
+CameraPanel -0-( ICameraView
+
+TrackingUI -0-( IREST
+TrackingUI -0-( IWebSocket
+HistoryUI -0-( IREST
+MapUI -0-( IREST
+MapUI -0-( IWebSocket
+
+WSService ..> TrackingUI : Live-Benachrichtigung
+WSService ..> MapUI : Live-Benachrichtigung
+RestAPI ..> TrackingUI : Tracking-Daten
+RestAPI ..> HistoryUI : Historische Daten
+RestAPI ..> MapUI : Geräte / Positionen
+
+' ============================================================
+' Web ↔ Externe Kartendienste
+' ============================================================
+MapUI -0-( IMapTiles
+Maplogik -0-( IMapTiles
+
+' ============================================================
+' Kamerasystem
+' ============================================================
+ESP32 ..> Hotspot : WLAN
+Hotspot ..> TailscaleCam : lokales Netz
+TailscaleCam -0-( IVPN
+CameraProxy -0-( IVPN
+CameraProxy -0-( IVideoStream
+CameraProxy -0-( ISnapshot
+CameraPanel -0-( ICameraProxy
+
+' ============================================================
+' Mobile ↔ Extern
+' ============================================================
+MobileApp -0-( IConnectivity
+MQTTClient -0-( IVPN
+SyncModul -0-( IVPN
+OfflineMaps -0-( IMapTiles
+
+' ============================================================
+' Legende
+' ============================================================
+legend bottom left
+  |= Symbol |= Bedeutung |
+  | ( ) Kreis | Bereitgestellte Schnittstelle (Lollipop) |
+  | ( Halbkreis | Benötigte Schnittstelle (Socket) |
+  | <<component>> | UML-Komponente |
+  | --- | Assembly / Nutzungsbeziehung |
+endlegend
+
+note bottom of Hotspot
+  Boot-LAN-Anbindung; konkrete
+  Hotspot-Nutzung im Repository
+  nicht eindeutig dokumentiert.
+end note
+
+@enduml
